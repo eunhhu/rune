@@ -1,17 +1,17 @@
-name: Bootstrap initial runtime
+name: Materialize clean Rune source
 
 on:
   push:
-    branches:
-      - feat/initial-runtime
+    branches: [main]
     paths:
-      - .bootstrap/ready
+      - ".bootstrap/trigger"
 
 permissions:
   contents: write
 
 jobs:
-  unpack:
+  materialize:
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,10 +21,47 @@ jobs:
       - name: Expand verified source tree
         run: python3 .bootstrap/unpack.py
 
-      - name: Commit source tree
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Verify TypeScript and Rust
+        id: verify
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          (
+            set -e
+            bun install
+            bun run typecheck
+            bun run test:ts
+            bun run compile:example
+            cargo test --workspace
+            cargo build -p rune-native --release
+          ) 2>&1 | tee /tmp/rune-bootstrap.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish clean source directly to main
+        if: steps.verify.outputs.status == '0'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: add native realtime macro runtime"
-          git push
+          git commit -m "feat: add stateful TypeScript realtime runtime"
+          git push origin HEAD:main
+
+      - name: Record verification failure
+        if: steps.verify.outputs.status != '0'
+        run: |
+          mkdir -p .bootstrap
+          cp /tmp/rune-bootstrap.log .bootstrap/last-failure.log
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f .bootstrap/last-failure.log
+          git diff --cached --quiet || git commit -m "ci: record Rune materialization failure"
+          git push origin HEAD:main
+          exit 1
