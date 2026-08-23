@@ -2,92 +2,125 @@
 
 Rune is a native realtime input automation runtime with a TypeScript scripting SDK.
 
-The design goal is simple: TypeScript describes macros, but **TypeScript never runs on the realtime input hot path**. Scripts compile to compact native programs that are evaluated and dispatched by a Rust runtime.
+TypeScript describes macros, but **TypeScript never runs on the realtime input hot path**. A script is evaluated once, compiled into a compact versioned program, and loaded into a Rust runtime that observes, matches, schedules, and injects input natively.
 
-> Early development. The public API and platform backends are still evolving.
+> Rune is an early MVP. The realtime input runtime is implemented; the retained native overlay renderer is designed but not implemented yet.
+
+## Why Rune exists
+
+Most desktop automation libraries optimize for convenience. Rune optimizes for predictable low latency and low jitter:
+
+- no JavaScript callbacks per input event
+- no allocation in trigger lookup or VM execution
+- no async runtime on the input thread
+- fixed-size trigger lookup tables
+- batched zero-delay output sequences
+- absolute monotonic deadlines with an optional spin tail
+- direct OS input APIs instead of a generic automation dependency
 
 ## Architecture
 
 ```text
-TypeScript / Bun
-  └─ @rune/sdk DSL
-       └─ compact ProgramSpec
-            └─ N-API control plane
-                 └─ rune-core
-                    ├─ precompiled trigger table
-                    ├─ allocation-free VM hot path
-                    ├─ monotonic deadline scheduler
-                    └─ native platform backend
+macro.ts                         control plane
+   │
+   ├─ @rune/sdk builder callback runs once
+   ├─ emits versioned RUNE binary IR
+   └─ Bun FFI loads the IR
+              │
+              ▼
+       rune-native / Rust        realtime plane
+   ┌──────────────────────────────────────────┐
+   │ native observer → trigger LUT → VM       │
+   │                         │                │
+   │                         └→ native inject │
+   └──────────────────────────────────────────┘
 ```
 
-The intended platform backends are:
+The intended platform path is direct and small:
 
-| Platform | Observe | Inject |
-| --- | --- | --- |
-| Windows | Raw Input | SendInput |
-| macOS | CGEventTap / IOHID | CGEventPost |
-| Linux | evdev | uinput |
+| Platform | Observe | Inject | MVP status |
+| --- | --- | --- | --- |
+| Windows | Raw Input | SendInput | implemented |
+| macOS | CGEventTap | CGEventPost | implemented |
+| Linux | evdev | uinput | implemented |
 
-Overlay rendering is intentionally a separate subsystem so input latency is never coupled to UI work.
-
-## Repository layout
-
-```text
-crates/rune-core/   Native IR, VM, scheduler, platform abstraction
-crates/rune-napi/   Thin N-API control plane for Bun/Node
-packages/sdk/       TypeScript macro DSL and native binding loader
-examples/           Example Rune scripts
-```
+The backends share USB HID key identifiers, so scripts do not contain Windows scan codes, macOS virtual key codes, or Linux input-event codes.
 
 ## Example
 
 ```ts
 import { Key, MouseButton, macro, rune } from "@rune/sdk";
 
-rune.load(
-  macro("lunge", (m) => {
-    m.on.keyDown(Key.Q).run(
-      m.key.down(Key.E),
-      m.mouse.down(MouseButton.Left),
-      m.delay.us(80),
-      m.mouse.up(MouseButton.Left),
-      m.key.up(Key.E),
-    );
-  }),
-);
+const lunge = macro("lunge", (m) => {
+  m.on.keyDown(Key.Q).run(
+    m.key.down(Key.E),
+    m.mouse.down(MouseButton.Left),
+    m.delay.us(80),
+    m.mouse.up(MouseButton.Left),
+    m.key.up(Key.E),
+  );
+});
 
-rune.start();
+rune.configure({ spinThresholdUs: 100 }).load(lunge).start();
 ```
 
-The builder callback above runs once while loading the script. It emits an IR program; it is **not** called when the physical key event arrives.
+The callback passed to `macro()` is a compile-time builder. It is not retained and is never invoked when Q is pressed.
 
-## Performance model
+Other compile-time helpers can expand into the same flat native program:
 
-Rune measures latency from the point an OS input event becomes visible to the runtime until the corresponding native injection call is submitted. Physical switch latency, USB polling, OS scheduling, and target-application input polling are outside that measurement.
+```ts
+const burst = macro("burst", (m) => {
+  m.on.mouseDown(MouseButton.Back).run(
+    m.repeat(3, m.mouse.click(MouseButton.Left), m.delay.us(75)),
+  );
+});
+```
 
-The realtime path is designed around:
+## Repository layout
 
-- no JavaScript callbacks
-- no heap allocation per input event
-- no async runtime
-- immutable precompiled programs
-- fixed-size trigger lookup
-- batched zero-delay output sequences
-- absolute monotonic deadlines for delayed sequences
+```text
+crates/rune-core/    IR decoder, trigger table, VM, deadline scheduler
+crates/rune-native/  C ABI plus Windows/macOS/Linux input backends
+crates/rune-bench/   dependency-free core dispatch percentile benchmark
+packages/sdk/        TypeScript DSL, encoder, and Bun FFI control plane
+examples/            runnable Rune scripts
+docs/                architecture, platform, and overlay design notes
+```
 
 ## Development
 
 Requirements:
 
-- Rust stable
-- Bun
+- Rust 1.81 or newer
+- Bun 1.3.14 or newer
 
 ```bash
 bun install
 cargo test --workspace
 bun run typecheck
+bun run test:ts
+cargo build -p rune-native --release
+bun run example:lunge
 ```
 
-## Status
+The SDK searches `target/release`, `target/debug`, and packaged native-artifact directories. `RUNE_NATIVE_PATH` can point at an explicit `.dll`, `.dylib`, or `.so`.
 
-The core IR/VM and SDK surface are being built first. Platform backends are implemented behind a small trait so each OS can be optimized independently without leaking platform details into user scripts.
+On Linux, reading `/dev/input/event*` and creating `/dev/uinput` requires explicit permission. See [`docs/platforms.md`](docs/platforms.md) before running Rune.
+
+## Benchmarking
+
+```bash
+cargo run -p rune-bench --release -- 1000000
+```
+
+The bundled benchmark measures only native trigger lookup, VM execution, and a null injector. It deliberately does not claim switch-to-application latency; USB polling, OS scheduling, the platform injection API, and target-application polling are separate parts of that path.
+
+## Overlay status
+
+The overlay is deliberately isolated from input execution. The design is a retained native scene with immutable snapshots handed to a platform render thread, never per-frame JavaScript draw callbacks. See [`docs/overlay.md`](docs/overlay.md).
+
+The first input-runtime MVP does **not** advertise the overlay capability yet. That avoids quietly replacing the zero-cost design with Electron, a webview, or a heavyweight cross-platform GUI stack.
+
+## License
+
+MIT

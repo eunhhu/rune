@@ -1,0 +1,21 @@
+{
+  "name": "rune-workspace",
+  "private": true,
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:native": "cargo build -p rune-native --release",
+    "test:rust": "cargo test --workspace",
+    "test:ts": "bun test packages/sdk/test",
+    "typecheck": "bunx tsc -p packages/sdk/tsconfig.json --noEmit",
+    "check": "bun run typecheck && bun run test:ts && cargo test --workspace",
+    "example:lunge": "bun examples/lunge.ts",
+    "bench": "cargo run -p rune-bench --release --"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "typescript": "7.0.2"
+  }
+}
