@@ -4,20 +4,21 @@ on:
   push:
     branches:
       - feat/initial-runtime
+    paths:
+      - .bootstrap/ready
 
 permissions:
   contents: write
 
 jobs:
   unpack:
-    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Expand source tree
+      - name: Expand verified source tree
         run: python3 .bootstrap/unpack.py
 
       - name: Commit source tree
