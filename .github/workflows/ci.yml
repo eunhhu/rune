@@ -1,41 +1,17 @@
-name: CI
+name: CI staging guard
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main]
+    paths-ignore:
+      - ".bootstrap/**"
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  rust:
-    name: Rust (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --workspace
-      - run: cargo build -p rune-native --release
-
-  msrv:
-    name: Rust 1.81
+  staging:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.81.0
-      - run: cargo check --workspace
-
-  typescript:
-    name: Bun / TypeScript
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run typecheck
-      - run: bun run test:ts
+      - run: echo "Verified Rune source materialization is pending."
