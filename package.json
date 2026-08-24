@@ -7,15 +7,19 @@
   ],
   "scripts": {
     "build:native": "cargo build -p rune-native --release",
+    "build:ts": "bunx tsc -b packages/sdk packages/compiler",
+    "typecheck": "bunx tsc -b packages/sdk packages/compiler --pretty false",
     "test:rust": "cargo test --workspace",
-    "test:ts": "bun test packages/sdk/test",
-    "typecheck": "bunx tsc -p packages/sdk/tsconfig.json --noEmit",
+    "test:ts": "bun test packages/sdk/test packages/compiler/test",
     "check": "bun run typecheck && bun run test:ts && cargo test --workspace",
-    "example:lunge": "bun examples/lunge.ts",
-    "bench": "cargo run -p rune-bench --release --"
+    "compile:example": "bun packages/compiler/src/cli.ts examples/stateful.rune.ts",
+    "bench": "cargo run -p rune-bench --release --",
+    "clean:ts": "bunx tsc -b packages/sdk packages/compiler --clean",
+    "setup": "bun install && bun run typecheck && cargo build -p rune-native --release",
+    "example:stateful": "bun examples/stateful.rune.ts"
   },
   "devDependencies": {
-    "@types/bun": "1.4.0",
-    "typescript": "7.0.2"
+    "@types/bun": "^1.2.21",
+    "typescript": "^5.8.3"
   }
 }
