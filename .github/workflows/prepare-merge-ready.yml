@@ -74,9 +74,10 @@ jobs:
                   "build:native": "cargo build -p rune-native --release",
                   "test:rust": "cargo test --workspace",
                   "test:ts": "bun test packages/sdk/test packages/compiler/test",
-                  "typecheck": "bunx tsc -p packages/sdk/tsconfig.json --noEmit && bunx tsc -p packages/compiler/tsconfig.json --noEmit",
+                  "typecheck": "bunx tsc -b packages/sdk packages/compiler --pretty false",
+                  "clean:ts": "bunx tsc -b packages/sdk packages/compiler --clean",
                   "check": "bun run typecheck && bun run test:ts && cargo test --workspace",
-                  "setup": "bun install && cargo build -p rune-native --release",
+                  "setup": "bun install && bun run typecheck && cargo build -p rune-native --release",
                   "example:lunge": "bun examples/lunge.ts",
                   "bench": "cargo run -p rune-bench --release --",
               }
@@ -87,6 +88,13 @@ jobs:
               typescript = "^5.9.2"
           dev_dependencies["typescript"] = typescript
           package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+
+          ignore_path = root / ".gitignore"
+          ignore = ignore_path.read_text(encoding="utf-8") if ignore_path.exists() else ""
+          for entry in ("/packages/*/dist/", "*.tsbuildinfo"):
+              if entry not in ignore.splitlines():
+                  ignore += ("" if ignore.endswith("\n") or not ignore else "\n") + entry + "\n"
+          ignore_path.write_text(ignore, encoding="utf-8")
 
       - name: Apply source compatibility fixes
         shell: python
@@ -139,6 +147,7 @@ jobs:
           set -euo pipefail
           bun run typecheck
           bun run test:ts
+          bun run clean:ts
 
       - name: Replace one-shot workflows with permanent CI
         shell: bash
@@ -215,5 +224,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: materialize verified Rune runtime source"
+          git commit -m "feat: materialize verified Spellwire runtime source"
           git push origin HEAD:fix/materialize-runtime
