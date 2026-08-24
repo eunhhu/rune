@@ -48,7 +48,7 @@ with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as bundle:
 workflow.parent.mkdir(parents=True, exist_ok=True)
 workflow.write_bytes(workflow_bytes)
 
-# The archive predates stricter closure-parameter inference in current Rust.
+# The archive predates stricter inference and borrow checking in current Rust.
 vm_path = root / "crates" / "rune-core" / "src" / "vm.rs"
 vm = vm_path.read_text(encoding="utf-8")
 vm = vm.replace(
@@ -62,6 +62,14 @@ vm = vm.replace(
 vm = vm.replace(
     "binary!(|left, right| left.wrapping_shr((right as u32) & 63))",
     "binary!(|left: i64, right: i64| left.wrapping_shr((right as u32) & 63))",
+)
+vm = vm.replace(
+    "Opcode::Neg => push!(pop!().wrapping_neg()),",
+    "Opcode::Neg => { let value = pop!(); push!(value.wrapping_neg()); },",
+)
+vm = vm.replace(
+    "Opcode::Not => push!(i64::from(pop!() == 0)),",
+    "Opcode::Not => { let value = pop!(); push!(i64::from(value == 0)); },",
 )
 vm_path.write_text(vm, encoding="utf-8")
 
