@@ -1,0 +1,27 @@
+name: Export source snapshot
+
+on:
+  push:
+    branches: ["tmp/export-pr4-conflict-fix"]
+    paths:
+      - ".github/workflows/export-source.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .git
+          tar -czf /tmp/source-snapshot.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr4-source-snapshot
+          path: /tmp/source-snapshot.tar.gz
+          retention-days: 1
