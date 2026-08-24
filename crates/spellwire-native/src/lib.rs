@@ -1,4 +1,5 @@
-mod platform;
+mod host;
+pub mod platform;
 
 use core::{ffi::c_void, ptr, ptr::NonNull, slice};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -164,7 +165,7 @@ impl Drop for EngineAccess {
 
 #[no_mangle]
 pub extern "C" fn spellwire_abi_version() -> u32 {
-    2
+    3
 }
 
 #[no_mangle]
@@ -415,6 +416,19 @@ mod tests {
         // this a no-op so the active dispatch can finish safely.
         unsafe { spellwire_engine_free(context.cast()) };
         0
+    }
+
+    #[test]
+    fn reports_owned_host_abi_capabilities() {
+        assert_eq!(spellwire_abi_version(), 3);
+        assert_eq!(
+            spellwire_capabilities(),
+            platform::Capability::HostCallbackInjection as u32
+                | platform::Capability::NativeObservation as u32
+                | platform::Capability::NativeInjection as u32
+                | platform::Capability::HostLifecycle as u32
+                | platform::Capability::NonBlockingDelay as u32
+        );
     }
 
     #[test]

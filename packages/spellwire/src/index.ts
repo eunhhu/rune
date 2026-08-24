@@ -29,8 +29,15 @@ export {
   NativeState,
 } from "./runtime";
 export type { InputEvent, InputHandler, NativeStateBridge } from "./runtime";
-export { OverlayScene } from "./overlay";
+export {
+  NativeOverlayRenderer,
+  OverlayScene,
+  overlayExecutableFileName,
+  resolveOverlayExecutable,
+} from "./overlay";
 export type {
+  NativeOverlayOptions,
+  NativeOverlayReady,
   OverlayLine,
   OverlayMutation,
   OverlayNode,
@@ -38,5 +45,24 @@ export type {
   OverlayRect,
   OverlayText,
 } from "./overlay";
+export {
+  NativeCapability,
+  NativeHost,
+  NativePermission,
+  NATIVE_ABI_VERSION,
+  inspectNativeRuntime,
+  loadProgramDescriptor,
+  nativeLibraryFileName,
+  resolveNativeLibrary,
+} from "./native";
+export type {
+  NativeHostOptions,
+  NativeHostWatcher,
+  NativeManifest,
+  ProgramDescriptor,
+  NativeRuntimeInfo,
+  NativeStateManifestEntry,
+  NativeWatchOptions,
+} from "./native";
 
 export * from "./compiler";

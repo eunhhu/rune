@@ -1,0 +1,25 @@
+[package]
+name = "spellwire-overlay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "spellwire-overlay"
+path = "src/main.rs"
+
+[dependencies]
+bytemuck = { version = "1.21", features = ["derive"] }
+fontdue = { version = "=0.9.3", default-features = false, features = ["std"] }
+pollster = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std", "simd"] }
+wgpu = "0.19"
+winit = { version = "0.29.15", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+
+[lints]
+workspace = true
