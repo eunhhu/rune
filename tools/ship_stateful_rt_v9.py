@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Documentation release trigger: materialize and verify the stateful runtime after this PR lands on main.
+
 import runpy
 import shutil
 from pathlib import Path
