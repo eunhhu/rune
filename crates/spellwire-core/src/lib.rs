@@ -9,8 +9,10 @@ pub use bytecode::{
     WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION,
 };
 pub use model::{
-    key, Edge, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent, SourceFilter,
-    Trigger,
+    key, modifier_for_key, Edge, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent,
+    SourceFilter, Trigger, MODIFIER_ALT, MODIFIER_CONTROL, MODIFIER_MASK, MODIFIER_META,
+    MODIFIER_SHIFT, NO_STATE_GATE, TRIGGER_CONSUME, TRIGGER_EXACT_MODIFIERS, TRIGGER_FLAGS,
+    TRIGGER_GATE_INVERTED, TRIGGER_IGNORE_REPEAT,
 };
 pub use program::{Handler, HandlerTable, MatchingHandlers, Program, ProgramError};
 pub use vm::{

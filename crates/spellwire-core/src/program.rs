@@ -1,6 +1,9 @@
 use core::fmt;
 
-use crate::{Edge, InputDevice, InputEvent, InputSource, Instruction, SourceFilter, Trigger};
+use crate::{
+    Edge, InputDevice, InputEvent, InputSource, Instruction, SourceFilter, Trigger, MODIFIER_MASK,
+    NO_STATE_GATE, TRIGGER_FLAGS, TRIGGER_GATE_INVERTED,
+};
 
 pub const MAX_KEY_CODE: usize = 256;
 pub const MAX_MOUSE_BUTTON: usize = 8;
@@ -173,6 +176,12 @@ impl Iterator for MatchingHandlers<'_> {
 }
 
 fn trigger_slot(trigger: Trigger) -> Option<usize> {
+    if trigger.flags & !TRIGGER_FLAGS != 0
+        || trigger.modifiers & !MODIFIER_MASK != 0
+        || (trigger.gate == NO_STATE_GATE && trigger.flags & TRIGGER_GATE_INVERTED != 0)
+    {
+        return None;
+    }
     let base = base_slot(trigger.device, trigger.code, trigger.edge)?;
     Some(source_slot(base, trigger.source))
 }

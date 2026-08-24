@@ -16,6 +16,7 @@ export const NativeCapability = {
   NativeOverlay: 1 << 3,
   HostLifecycle: 1 << 4,
   NonBlockingDelay: 1 << 5,
+  NativeInputSuppression: 1 << 6,
 } as const;
 
 export const NativePermission = {

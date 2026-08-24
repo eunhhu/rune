@@ -92,10 +92,13 @@ impl Program {
             let raw_device = reader.u8()?;
             let raw_edge = reader.u8()?;
             let raw_source = reader.u8()?;
-            let _reserved = reader.u8()?;
+            let flags = reader.u8()?;
             let code = reader.u16()?;
-            let _reserved = reader.u16()?;
+            let modifiers = reader.u8()?;
+            let _reserved = reader.u8()?;
             let entry = reader.u32()?;
+            let gate = reader.u16()?;
+            let _reserved = reader.u16()?;
             handlers.push(Handler {
                 trigger: Trigger {
                     device: InputDevice::try_from(raw_device)
@@ -105,6 +108,9 @@ impl Program {
                         .map_err(|()| DecodeError::InvalidEdge(raw_edge))?,
                     source: SourceFilter::try_from(raw_source)
                         .map_err(|()| DecodeError::InvalidSource(raw_source))?,
+                    flags,
+                    modifiers,
+                    gate,
                 },
                 entry,
             });
@@ -198,7 +204,7 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.extend(WIRE_MAGIC);
         bytes.extend(WIRE_VERSION.to_le_bytes());
-        bytes.extend(0_u16.to_le_bytes());
+        bytes.extend(0_u16.to_le_bytes()); // flags
         bytes.extend(1_u16.to_le_bytes()); // states
         bytes.extend(1_u16.to_le_bytes()); // handlers
         bytes.extend(0_u16.to_le_bytes()); // locals
@@ -208,8 +214,11 @@ mod tests {
         bytes.extend(7_i64.to_le_bytes());
         bytes.extend([0, 0, 0, 0]);
         bytes.extend(0x14_u16.to_le_bytes());
-        bytes.extend(0_u16.to_le_bytes());
+        bytes.push(0); // modifiers
+        bytes.push(0); // reserved
         bytes.extend(0_u32.to_le_bytes());
+        bytes.extend(crate::NO_STATE_GATE.to_le_bytes());
+        bytes.extend(0_u16.to_le_bytes());
         bytes.push(Opcode::Halt as u8);
         bytes.push(0);
         bytes.extend(0_u16.to_le_bytes());

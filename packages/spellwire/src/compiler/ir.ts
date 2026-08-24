@@ -1,7 +1,8 @@
-export const WIRE_VERSION = 2;
+export const WIRE_VERSION = 3;
 export const WIRE_HEADER_SIZE = 24;
-export const WIRE_HANDLER_SIZE = 12;
+export const WIRE_HANDLER_SIZE = 16;
 export const WIRE_INSTRUCTION_SIZE = 16;
+export const NO_STATE_GATE = 0xffff;
 
 export enum Opcode {
   Halt = 0,
@@ -61,6 +62,13 @@ export enum SourceFilter {
   Any = 2,
 }
 
+export const TriggerFlag = {
+  Consume: 1 << 0,
+  ExactModifiers: 1 << 1,
+  IgnoreRepeat: 1 << 2,
+  GateInverted: 1 << 3,
+} as const;
+
 export interface Instruction {
   opcode: Opcode;
   flags: number;
@@ -73,6 +81,9 @@ export interface Handler {
   device: InputDevice;
   edge: InputEdge;
   source: SourceFilter;
+  flags: number;
+  modifiers: number;
+  gate: number;
   code: number;
   entry: number;
 }

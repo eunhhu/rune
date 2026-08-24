@@ -365,6 +365,9 @@ mod tests {
                     code: key::Q,
                     edge: Edge::Down,
                     source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: spellwire_core::NO_STATE_GATE,
                 },
                 entry: 0,
             }]
@@ -421,14 +424,7 @@ mod tests {
     #[test]
     fn reports_owned_host_abi_capabilities() {
         assert_eq!(spellwire_abi_version(), 4);
-        assert_eq!(
-            spellwire_capabilities(),
-            platform::Capability::HostCallbackInjection as u32
-                | platform::Capability::NativeObservation as u32
-                | platform::Capability::NativeInjection as u32
-                | platform::Capability::HostLifecycle as u32
-                | platform::Capability::NonBlockingDelay as u32
-        );
+        assert_eq!(spellwire_capabilities(), platform::current_capabilities());
     }
 
     #[test]

@@ -44,10 +44,13 @@ export function encodeModule(module: CompiledModule): Uint8Array {
     view.setUint8(offset, handler.device);
     view.setUint8(offset + 1, handler.edge);
     view.setUint8(offset + 2, handler.source);
-    view.setUint8(offset + 3, 0);
+    view.setUint8(offset + 3, handler.flags);
     view.setUint16(offset + 4, handler.code, true);
-    view.setUint16(offset + 6, 0, true);
+    view.setUint8(offset + 6, handler.modifiers);
+    view.setUint8(offset + 7, 0);
     view.setUint32(offset + 8, handler.entry, true);
+    view.setUint16(offset + 12, handler.gate, true);
+    view.setUint16(offset + 14, 0, true);
     offset += WIRE_HANDLER_SIZE;
   }
 

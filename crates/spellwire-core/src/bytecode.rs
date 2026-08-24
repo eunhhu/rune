@@ -1,9 +1,9 @@
 use core::fmt;
 
 pub const WIRE_MAGIC: [u8; 4] = *b"SPWR";
-pub const WIRE_VERSION: u16 = 2;
+pub const WIRE_VERSION: u16 = 3;
 pub const WIRE_HEADER_SIZE: usize = 24;
-pub const WIRE_HANDLER_SIZE: usize = 12;
+pub const WIRE_HANDLER_SIZE: usize = 16;
 pub const WIRE_INSTRUCTION_SIZE: usize = 16;
 
 /// Output/query opcodes read their operands from the VM stack when this bit is set.

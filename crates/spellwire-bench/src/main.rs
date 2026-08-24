@@ -34,6 +34,9 @@ fn main() {
                 code: key::Q,
                 edge: Edge::Down,
                 source: SourceFilter::Physical,
+                flags: 0,
+                modifiers: 0,
+                gate: spellwire_core::NO_STATE_GATE,
             },
             entry: 0,
         }]

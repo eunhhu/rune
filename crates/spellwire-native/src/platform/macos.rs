@@ -2,7 +2,7 @@ use core::{ffi::c_void, ptr};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{sync_channel, SyncSender, TrySendError},
+        mpsc::{sync_channel, SyncSender},
         Arc,
     },
     thread,
@@ -10,10 +10,13 @@ use std::{
 };
 
 use spellwire_core::{
-    Edge, Injector, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent,
+    key, Edge, Injector, InputDevice, InputEvent, InputSource, InputState, MouseButton, OutputEvent,
 };
 
-use super::{Observer, PlatformError, PlatformInjector, PERMISSION_INJECT, PERMISSION_OBSERVE};
+use super::{
+    InputPolicy, InputSender, Observer, PlatformError, PlatformInjector, PERMISSION_INJECT,
+    PERMISSION_OBSERVE,
+};
 
 const SPELLWIRE_EVENT_TAG: i64 = 0x5350_454c_4c57_4952;
 const KEYBOARD_KEYCODE_FIELD: u32 = 9;
@@ -35,7 +38,7 @@ const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xffff_ffff;
 
 const SESSION_EVENT_TAP: u32 = 1;
 const HEAD_INSERT_EVENT_TAP: u32 = 0;
-const LISTEN_ONLY_EVENT_TAP: u32 = 1;
+const DEFAULT_EVENT_TAP: u32 = 0;
 const HID_EVENT_TAP: u32 = 0;
 const PRIVATE_EVENT_SOURCE: i32 = -1;
 const PIXEL_SCROLL_UNIT: u32 = 0;
@@ -232,7 +235,10 @@ pub fn create_injector() -> Result<PlatformInjector, PlatformError> {
 }
 
 struct ObserverContext {
-    sender: SyncSender<InputEvent>,
+    sender: InputSender,
+    policy: Arc<InputPolicy>,
+    input_state: InputState,
+    consumed_state: InputState,
     tap: CFMachPortRef,
 }
 
@@ -316,14 +322,55 @@ unsafe extern "C" fn event_tap_callback(
     };
 
     if let Some(input) = translated {
-        match context.sender.try_send(input) {
-            Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
+        let mut consume = false;
+        for normalized in normalize_input(event_type, input).into_iter().flatten() {
+            consume |= process_observed(context, normalized);
+        }
+        if consume {
+            return ptr::null_mut();
         }
     }
     event
 }
 
-pub fn start_observer(sender: SyncSender<InputEvent>) -> Result<Observer, PlatformError> {
+fn normalize_input(event_type: u32, input: InputEvent) -> [Option<InputEvent>; 2] {
+    if event_type == EVENT_FLAGS_CHANGED
+        && input.device == InputDevice::Keyboard
+        && input.code == key::CAPS_LOCK
+    {
+        [
+            Some(InputEvent { edge: Edge::Down, ..input }),
+            Some(InputEvent { edge: Edge::Up, ..input }),
+        ]
+    } else {
+        [Some(input), None]
+    }
+}
+
+fn process_observed(context: &mut ObserverContext, input: InputEvent) -> bool {
+    let modifiers = context.input_state.modifiers_for_event(input);
+    let repeated = input.edge == Edge::Down
+        && context.input_state.held_for_source(input.device, input.code, input.source);
+    let paired = context.consumed_state.held_for_source(input.device, input.code, input.source);
+    let consume = paired || context.policy.should_consume(input, modifiers, repeated);
+    context.input_state.apply(input);
+    if context.sender.try_send(input) {
+        if consume || input.edge == Edge::Up {
+            context.consumed_state.apply(input);
+        }
+        consume
+    } else {
+        if input.edge == Edge::Up {
+            context.consumed_state.apply(input);
+        }
+        false
+    }
+}
+
+pub fn start_observer(
+    sender: InputSender,
+    policy: Arc<InputPolicy>,
+) -> Result<Observer, PlatformError> {
     // SAFETY: This is a read-only OS permission query.
     if !unsafe { CGPreflightListenEventAccess() } {
         return Err(PlatformError::PermissionDenied("macOS Input Monitoring"));
@@ -334,7 +381,7 @@ pub fn start_observer(sender: SyncSender<InputEvent>) -> Result<Observer, Platfo
     let (setup_sender, setup_receiver) = sync_channel(1);
     let join = thread::Builder::new()
         .name("spellwire-macos-observer".into())
-        .spawn(move || run_observer(sender, worker_stop, setup_sender))?;
+        .spawn(move || run_observer(sender, policy, worker_stop, setup_sender))?;
     match setup_receiver.recv() {
         Ok(Ok(())) => Ok(Observer::new(stop, join)),
         Ok(Err(error)) => {
@@ -352,11 +399,18 @@ pub fn start_observer(sender: SyncSender<InputEvent>) -> Result<Observer, Platfo
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_observer(
-    sender: SyncSender<InputEvent>,
+    sender: InputSender,
+    policy: Arc<InputPolicy>,
     stop: Arc<AtomicBool>,
     setup: SyncSender<Result<(), PlatformError>>,
 ) -> Result<(), PlatformError> {
-    let mut context = Box::new(ObserverContext { sender, tap: ptr::null_mut() });
+    let mut context = Box::new(ObserverContext {
+        sender,
+        policy,
+        input_state: InputState::new(),
+        consumed_state: InputState::new(),
+        tap: ptr::null_mut(),
+    });
     let mask = [
         EVENT_LEFT_MOUSE_DOWN,
         EVENT_LEFT_MOUSE_UP,
@@ -377,7 +431,7 @@ fn run_observer(
         CGEventTapCreate(
             SESSION_EVENT_TAP,
             HEAD_INSERT_EVENT_TAP,
-            LISTEN_ONLY_EVENT_TAP,
+            DEFAULT_EVENT_TAP,
             mask,
             event_tap_callback,
             ptr::addr_of_mut!(*context).cast(),
@@ -625,5 +679,19 @@ mod tests {
         assert_eq!(hid_to_mac_keycode(0x87), Some(94));
         assert_eq!(hid_to_mac_keycode(0xe7), Some(54));
         assert_eq!(hid_to_mac_keycode(0xff), None);
+    }
+
+    #[test]
+    fn normalizes_caps_lock_flags_change_to_one_press_pulse() {
+        let input = InputEvent {
+            device: InputDevice::Keyboard,
+            code: key::CAPS_LOCK,
+            edge: Edge::Up,
+            source: InputSource::Physical,
+        };
+        let normalized = normalize_input(EVENT_FLAGS_CHANGED, input);
+
+        assert_eq!(normalized[0].map(|event| event.edge), Some(Edge::Down));
+        assert_eq!(normalized[1].map(|event| event.edge), Some(Edge::Up));
     }
 }

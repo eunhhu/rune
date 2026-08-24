@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{sync_channel, SyncSender, TrySendError},
+        mpsc::{sync_channel, SyncSender},
         Arc,
     },
     thread,
@@ -18,7 +18,10 @@ use spellwire_core::{
     Edge, Injector, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent,
 };
 
-use super::{Observer, PlatformError, PlatformInjector, PERMISSION_INJECT, PERMISSION_OBSERVE};
+use super::{
+    InputPolicy, InputSender, Observer, PlatformError, PlatformInjector, PERMISSION_INJECT,
+    PERMISSION_OBSERVE,
+};
 
 const VIRTUAL_DEVICE_NAME: &str = "Spellwire Virtual Input";
 const EV_SYN: u16 = 0x00;
@@ -236,7 +239,10 @@ struct ObservedDevice {
     source: InputSource,
 }
 
-pub fn start_observer(sender: SyncSender<InputEvent>) -> Result<Observer, PlatformError> {
+pub fn start_observer(
+    sender: InputSender,
+    _policy: Arc<InputPolicy>,
+) -> Result<Observer, PlatformError> {
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
     let (setup_sender, setup_receiver) = sync_channel(1);
@@ -260,7 +266,7 @@ pub fn start_observer(sender: SyncSender<InputEvent>) -> Result<Observer, Platfo
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_observer(
-    sender: SyncSender<InputEvent>,
+    sender: InputSender,
     stop: Arc<AtomicBool>,
     setup: SyncSender<Result<(), &'static str>>,
 ) -> Result<(), PlatformError> {
@@ -312,7 +318,7 @@ fn run_observer(
 
 fn read_device_events(
     device: &mut ObservedDevice,
-    sender: &SyncSender<InputEvent>,
+    sender: &InputSender,
 ) -> Result<(), PlatformError> {
     // SAFETY: An all-zero input_event array is valid writable storage for read().
     let mut events: [libc::input_event; 32] = unsafe { core::mem::zeroed() };
@@ -327,9 +333,10 @@ fn read_device_events(
         Ok(0) => Ok(()),
         Ok(count) => {
             for event in &events[..count / size_of::<libc::input_event>()] {
-                if event.type_ != EV_KEY || event.value == 2 {
+                if event.type_ != EV_KEY {
                     continue;
                 }
+                let Some(edge) = linux_key_edge(event.value) else { continue };
                 let translated = linux_key_to_hid(event.code)
                     .map(|code| (InputDevice::Keyboard, code))
                     .or_else(|| {
@@ -337,20 +344,21 @@ fn read_device_events(
                             .map(|button| (InputDevice::MouseButton, button as u16))
                     });
                 let Some((input_device, code)) = translated else { continue };
-                let input = InputEvent {
-                    device: input_device,
-                    code,
-                    edge: if event.value == 0 { Edge::Up } else { Edge::Down },
-                    source: device.source,
-                };
-                match sender.try_send(input) {
-                    Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
-                }
+                let input = InputEvent { device: input_device, code, edge, source: device.source };
+                let _ = sender.try_send(input);
             }
             Ok(())
         }
         Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(()),
         Err(error) => Err(PlatformError::Io(error)),
+    }
+}
+
+const fn linux_key_edge(value: i32) -> Option<Edge> {
+    match value {
+        0 => Some(Edge::Up),
+        1 | 2 => Some(Edge::Down),
+        _ => None,
     }
 }
 
@@ -616,5 +624,13 @@ mod tests {
             let canonical = linux_key_to_hid(key).unwrap();
             assert_eq!(hid_to_linux_key(canonical), Some(key));
         }
+    }
+
+    #[test]
+    fn preserves_linux_repeat_as_a_second_down_transition() {
+        assert_eq!(linux_key_edge(0), Some(Edge::Up));
+        assert_eq!(linux_key_edge(1), Some(Edge::Down));
+        assert_eq!(linux_key_edge(2), Some(Edge::Down));
+        assert_eq!(linux_key_edge(-1), None);
     }
 }

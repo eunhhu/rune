@@ -1,10 +1,13 @@
 import ts from "typescript";
-import { InputSource, Key, MouseButton } from "../keys";
+import { InputSource, Key, Modifier, MouseButton } from "../keys";
+import { parseHotkey } from "../hotkey";
 import {
   InputDevice,
   InputEdge,
+  NO_STATE_GATE,
   Opcode,
   SourceFilter,
+  TriggerFlag,
   instruction,
   type CompiledModule,
   type Handler,
@@ -57,6 +60,14 @@ interface FunctionContext {
   returnPatches: number[];
 }
 
+interface ParsedTriggerOptions {
+  source: SourceFilter;
+  flags: number;
+  modifiers: number;
+  gate: number;
+  edge?: InputEdge;
+}
+
 class Scope {
   readonly bindings = new Map<string, Binding>();
 
@@ -97,7 +108,7 @@ class Compiler {
     this.collectTopLevelDeclarations();
     this.collectHandlers();
     if (this.handlers.length === 0) {
-      this.fail(this.sourceFile, "No rt.onKeyDown/onKeyUp/onMouseDown/onMouseUp handlers were found");
+      this.fail(this.sourceFile, "No rt.hotkey/remap/onKey*/onMouse* handlers were found");
     }
     return {
       sourceFile: this.sourceFile,
@@ -160,6 +171,10 @@ class Compiler {
       if (!ts.isIdentifier(target) || target.text !== "rt") continue;
 
       const method = call.expression.name.text;
+      if (method === "remap") {
+        this.collectRemap(call);
+        continue;
+      }
       const trigger = this.parseTrigger(method, call);
       if (!trigger) continue;
       const callback = call.arguments[1];
@@ -188,6 +203,9 @@ class Compiler {
   parseTrigger(method: string, call: ts.CallExpression): Omit<Handler, "entry"> | undefined {
     let device: InputDevice;
     let edge: InputEdge;
+    let code: number;
+    let optionDefaults: Partial<ParsedTriggerOptions> = {};
+    let allowModifierOption = true;
     switch (method) {
       case "onKeyDown":
         device = InputDevice.Keyboard;
@@ -205,13 +223,42 @@ class Compiler {
         device = InputDevice.MouseButton;
         edge = InputEdge.Up;
         break;
+      case "hotkey": {
+        const chordExpression = call.arguments[0];
+        if (!chordExpression) this.fail(call, "hotkey requires a chord string");
+        const chord = this.constantString(chordExpression);
+        if (chord === undefined) {
+          this.fail(chordExpression, "hotkey chord must be a constant string");
+        }
+        let parsed: ReturnType<typeof parseHotkey>;
+        try {
+          parsed = parseHotkey(chord);
+        } catch (error) {
+          this.fail(chordExpression, error instanceof Error ? error.message : String(error));
+        }
+        device = parsed.device === "keyboard" ? InputDevice.Keyboard : InputDevice.MouseButton;
+        edge = InputEdge.Down;
+        code = parsed.code;
+        optionDefaults = {
+          flags: TriggerFlag.Consume | TriggerFlag.ExactModifiers,
+          modifiers: parsed.modifiers,
+        };
+        allowModifierOption = false;
+        const options = this.parseTriggerOptions(
+          call.arguments[2],
+          optionDefaults,
+          allowModifierOption,
+          ["source", "consume", "exactModifiers", "repeat", "when", "edge"],
+        );
+        return { device, edge: options.edge ?? edge, code, ...options };
+      }
       default:
         return undefined;
     }
     const codeExpression = call.arguments[0];
     if (!codeExpression) this.fail(call, `${method} requires a key/button argument`);
-    const code = this.constantNumber(codeExpression);
-    if (code === undefined) {
+    code = this.constantNumber(codeExpression) ?? -1;
+    if (code === -1) {
       this.fail(codeExpression, `${method} key/button must be a constant integer`);
     }
     const maxCode =
@@ -220,41 +267,215 @@ class Compiler {
       const label = device === InputDevice.Keyboard ? "key code" : "mouse button";
       this.fail(codeExpression, `${method} ${label} must be between 0 and ${maxCode}`);
     }
-    const source = this.parseSource(call.arguments[2]);
-    return { device, edge, source, code };
+    const options = this.parseTriggerOptions(
+      call.arguments[2],
+      optionDefaults,
+      allowModifierOption,
+    );
+    return { device, edge, code, ...options };
   }
 
-  parseSource(options: ts.Expression | undefined): SourceFilter {
-    if (!options) return SourceFilter.Physical;
+  parseTriggerOptions(
+    options: ts.Expression | undefined,
+    defaults: Partial<ParsedTriggerOptions> = {},
+    allowModifierOption = true,
+    allowedOptions: readonly string[] = [
+      "source",
+      "consume",
+      "modifiers",
+      "exactModifiers",
+      "repeat",
+      "when",
+    ],
+  ): ParsedTriggerOptions {
+    let source = defaults.source ?? SourceFilter.Physical;
+    let flags = defaults.flags ?? 0;
+    let modifiers = defaults.modifiers ?? 0;
+    let gate = defaults.gate ?? NO_STATE_GATE;
+    let edge = defaults.edge;
+    if (!options) return { source, flags, modifiers, gate, ...(edge === undefined ? {} : { edge }) };
     if (!ts.isObjectLiteralExpression(options)) {
       this.fail(options, "Realtime handler options must be an object literal");
     }
-    let source = SourceFilter.Physical;
-    let sourceSeen = false;
+    const seen = new Set<string>();
     for (const property of options.properties) {
       let valueExpression: ts.Expression;
+      let name: string | undefined;
       if (ts.isPropertyAssignment(property)) {
-        if (this.propertyName(property.name) !== "source") {
-          this.fail(property, "Realtime handler options support only the source property");
-        }
+        name = this.propertyName(property.name);
         valueExpression = property.initializer;
-      } else if (ts.isShorthandPropertyAssignment(property) && property.name.text === "source") {
+      } else if (ts.isShorthandPropertyAssignment(property)) {
+        name = property.name.text;
         valueExpression = property.name;
       } else {
         this.fail(
           property,
-          "Realtime handler options require an explicit or shorthand source property",
+          "Realtime handler options require plain properties",
         );
       }
-      if (sourceSeen) this.fail(property, "Realtime handler options contain duplicate source values");
-      sourceSeen = true;
+      if (!name || !allowedOptions.includes(name)) {
+        this.fail(property, `Unsupported realtime handler option ${JSON.stringify(name)}`);
+      }
+      if (name === "modifiers" && !allowModifierOption) {
+        this.fail(property, "hotkey modifiers belong in the chord string");
+      }
+      if (seen.has(name)) this.fail(property, `Duplicate realtime handler option ${name}`);
+      seen.add(name);
+      if (name === "when") {
+        const parsed = this.parseStateGate(valueExpression);
+        gate = parsed.gate;
+        flags = parsed.inverted
+          ? flags | TriggerFlag.GateInverted
+          : flags & ~TriggerFlag.GateInverted;
+        continue;
+      }
+      if (name === "edge") {
+        const value = this.constantString(valueExpression);
+        if (value === "down") edge = InputEdge.Down;
+        else if (value === "up") edge = InputEdge.Up;
+        else this.fail(valueExpression, "edge must be \"down\" or \"up\"");
+        continue;
+      }
       const value = this.constantNumber(valueExpression);
-      if (value === InputSource.Physical) source = SourceFilter.Physical;
-      else if (value === InputSource.Synthetic) source = SourceFilter.Synthetic;
-      else if (value === InputSource.Any) source = SourceFilter.Any;
-      else this.fail(valueExpression, "Invalid InputSource value");
+      if (value === undefined) this.fail(valueExpression, `${name} must be a compile-time constant`);
+      switch (name) {
+        case "source":
+          if (value === InputSource.Physical) source = SourceFilter.Physical;
+          else if (value === InputSource.Synthetic) source = SourceFilter.Synthetic;
+          else if (value === InputSource.Any) source = SourceFilter.Any;
+          else this.fail(valueExpression, "Invalid InputSource value");
+          break;
+        case "consume":
+          flags = this.withBooleanFlag(flags, TriggerFlag.Consume, value, valueExpression);
+          break;
+        case "exactModifiers":
+          flags = this.withBooleanFlag(
+            flags,
+            TriggerFlag.ExactModifiers,
+            value,
+            valueExpression,
+          );
+          break;
+        case "repeat":
+          flags = this.withBooleanFlag(flags, TriggerFlag.IgnoreRepeat, 1 - value, valueExpression);
+          break;
+        case "modifiers":
+          if (value < 0 || value > 0x0f) {
+            this.fail(valueExpression, "modifiers must use the four logical Modifier bits");
+          }
+          modifiers = value;
+          break;
+      }
     }
-    return source;
+    return { source, flags, modifiers, gate, ...(edge === undefined ? {} : { edge }) };
+  }
+
+  parseStateGate(expression: ts.Expression): { gate: number; inverted: boolean } {
+    if (!ts.isArrowFunction(expression) && !ts.isFunctionExpression(expression)) {
+      this.fail(expression, "when must be a zero-argument function returning native boolean state");
+    }
+    if (expression.parameters.length !== 0) {
+      this.fail(expression, "when gate cannot declare parameters");
+    }
+    let result: ts.Expression;
+    if (ts.isBlock(expression.body)) {
+      const [statement] = expression.body.statements;
+      if (
+        expression.body.statements.length !== 1 ||
+        !statement ||
+        !ts.isReturnStatement(statement) ||
+        !statement.expression
+      ) {
+        this.fail(expression.body, "when gate body must contain one return expression");
+      }
+      result = statement.expression;
+    } else {
+      result = expression.body;
+    }
+    while (
+      ts.isParenthesizedExpression(result) ||
+      ts.isAsExpression(result) ||
+      ts.isTypeAssertionExpression(result) ||
+      ts.isNonNullExpression(result)
+    ) {
+      result = result.expression;
+    }
+    let inverted = false;
+    if (ts.isPrefixUnaryExpression(result) && result.operator === ts.SyntaxKind.ExclamationToken) {
+      inverted = true;
+      result = result.operand;
+    }
+    if (!ts.isIdentifier(result)) {
+      this.fail(result, "when gate must return a native boolean state or its negation");
+    }
+    const binding = this.stateBindings.get(result.text);
+    const state = binding?.kind === "state" ? this.states[binding.slot] : undefined;
+    if (!state || state.kind !== "boolean") {
+      this.fail(result, "when gate must reference a module-scope boolean let state");
+    }
+    if (state.slot >= NO_STATE_GATE) {
+      this.fail(result, `when gates support the first ${NO_STATE_GATE} native states`);
+    }
+    return { gate: state.slot, inverted };
+  }
+
+  withBooleanFlag(flags: number, flag: number, value: number, node: ts.Node): number {
+    if (value !== 0 && value !== 1) this.fail(node, "Boolean option must be true or false");
+    return value === 1 ? flags | flag : flags & ~flag;
+  }
+
+  collectRemap(call: ts.CallExpression): void {
+    const fromExpression = call.arguments[0];
+    const toExpression = call.arguments[1];
+    if (!fromExpression || !toExpression) this.fail(call, "remap requires source and target keys");
+    const from = this.constantRemapKey(fromExpression, "source", MAX_TRIGGER_KEY_CODE);
+    const to = this.constantRemapKey(toExpression, "target", MAX_TRIGGER_KEY_CODE);
+    const options = this.parseTriggerOptions(
+      call.arguments[2],
+      { flags: TriggerFlag.Consume },
+      false,
+      ["source", "repeat", "when"],
+    );
+    if (options.modifiers !== 0 || (options.flags & TriggerFlag.ExactModifiers) !== 0) {
+      this.fail(call.arguments[2] ?? call, "remap options support only source, repeat, and when");
+    }
+    for (const [edge, opcode] of [
+      [InputEdge.Down, Opcode.KeyDown],
+      [InputEdge.Up, Opcode.KeyUp],
+    ] as const) {
+      const entry = this.code.length;
+      this.emit(opcode, { a: to });
+      this.emit(Opcode.Halt);
+      this.handlers.push({
+        device: InputDevice.Keyboard,
+        edge,
+        source: options.source,
+        flags: options.flags | TriggerFlag.Consume,
+        modifiers: 0,
+        gate: options.gate,
+        code: from,
+        entry,
+      });
+    }
+  }
+
+  constantRemapKey(expression: ts.Expression, label: "source" | "target", maximum: number): number {
+    let value = this.constantNumber(expression);
+    if (value === undefined) {
+      const name = this.constantString(expression);
+      if (name !== undefined) {
+        try {
+          const parsed = parseHotkey(name);
+          if (parsed.device === "keyboard" && parsed.modifiers === 0) value = parsed.code;
+        } catch {
+          // The uniform diagnostic below is clearer for remap call sites.
+        }
+      }
+    }
+    if (value === undefined || value < 0 || value > maximum) {
+      this.fail(expression, `remap ${label} must be one constant keyboard key`);
+    }
+    return value;
   }
 
   propertyName(name: ts.PropertyName): string | undefined {
@@ -858,6 +1079,27 @@ class Compiler {
     return Number.isSafeInteger(number) ? number : undefined;
   }
 
+  constantString(expression: ts.Expression, seen = new Set<string>()): string | undefined {
+    if (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isTypeAssertionExpression(expression) ||
+      ts.isNonNullExpression(expression)
+    ) {
+      return this.constantString(expression.expression, seen);
+    }
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+      return expression.text;
+    }
+    if (!ts.isIdentifier(expression) || seen.has(expression.text)) return undefined;
+    const initializer = this.constants.get(expression.text);
+    if (!initializer) return undefined;
+    seen.add(expression.text);
+    const value = this.constantString(initializer, seen);
+    seen.delete(expression.text);
+    return value;
+  }
+
   constantValue(expression: ts.Expression, seen: Set<string>): bigint | undefined {
     if (
       ts.isParenthesizedExpression(expression) ||
@@ -1085,7 +1327,15 @@ function callName(expression: ts.LeftHandSideExpression): string | undefined {
 }
 
 function enumMember(owner: string, member: string): number | undefined {
-  const source = owner === "Key" ? Key : owner === "MouseButton" ? MouseButton : owner === "InputSource" ? InputSource : undefined;
+  const source = owner === "Key"
+    ? Key
+    : owner === "MouseButton"
+      ? MouseButton
+      : owner === "InputSource"
+        ? InputSource
+        : owner === "Modifier"
+          ? Modifier
+        : undefined;
   if (!source) return undefined;
   const value = source[member as keyof typeof source];
   return typeof value === "number" ? value : undefined;

@@ -178,6 +178,20 @@ pub enum SourceFilter {
     Any = 2,
 }
 
+pub const MODIFIER_CONTROL: u8 = 1 << 0;
+pub const MODIFIER_SHIFT: u8 = 1 << 1;
+pub const MODIFIER_ALT: u8 = 1 << 2;
+pub const MODIFIER_META: u8 = 1 << 3;
+pub const MODIFIER_MASK: u8 = MODIFIER_CONTROL | MODIFIER_SHIFT | MODIFIER_ALT | MODIFIER_META;
+
+pub const TRIGGER_CONSUME: u8 = 1 << 0;
+pub const TRIGGER_EXACT_MODIFIERS: u8 = 1 << 1;
+pub const TRIGGER_IGNORE_REPEAT: u8 = 1 << 2;
+pub const TRIGGER_GATE_INVERTED: u8 = 1 << 3;
+pub const TRIGGER_FLAGS: u8 =
+    TRIGGER_CONSUME | TRIGGER_EXACT_MODIFIERS | TRIGGER_IGNORE_REPEAT | TRIGGER_GATE_INVERTED;
+pub const NO_STATE_GATE: u16 = u16::MAX;
+
 impl TryFrom<u8> for SourceFilter {
     type Error = ();
 
@@ -197,6 +211,44 @@ pub struct Trigger {
     pub code: u16,
     pub edge: Edge,
     pub source: SourceFilter,
+    pub flags: u8,
+    pub modifiers: u8,
+    pub gate: u16,
+}
+
+impl Trigger {
+    #[must_use]
+    pub const fn matches_context(self, modifiers: u8, repeated: bool) -> bool {
+        if repeated && self.flags & TRIGGER_IGNORE_REPEAT != 0 {
+            return false;
+        }
+        let modifiers = modifiers & MODIFIER_MASK;
+        if self.flags & TRIGGER_EXACT_MODIFIERS != 0 {
+            modifiers == self.modifiers
+        } else {
+            modifiers & self.modifiers == self.modifiers
+        }
+    }
+
+    #[must_use]
+    pub fn matches_gate(self, state: &[i64]) -> bool {
+        if self.gate == NO_STATE_GATE {
+            return true;
+        }
+        let active = state.get(usize::from(self.gate)).is_some_and(|value| *value != 0);
+        active != (self.flags & TRIGGER_GATE_INVERTED != 0)
+    }
+}
+
+#[must_use]
+pub const fn modifier_for_key(code: u16) -> u8 {
+    match code {
+        key::LEFT_CONTROL | key::RIGHT_CONTROL => MODIFIER_CONTROL,
+        key::LEFT_SHIFT | key::RIGHT_SHIFT => MODIFIER_SHIFT,
+        key::LEFT_ALT | key::RIGHT_ALT => MODIFIER_ALT,
+        key::LEFT_META | key::RIGHT_META => MODIFIER_META,
+        _ => 0,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

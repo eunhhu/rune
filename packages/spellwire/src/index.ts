@@ -1,4 +1,5 @@
-export { Key, MouseButton, InputSource } from "./keys";
+export { Key, Modifier, MouseButton, InputSource } from "./keys";
+export { parseHotkey, type ParsedHotkey } from "./hotkey";
 export { Spellwire } from "./app";
 export type { SpellwireStartOptions } from "./app";
 export {
@@ -18,6 +19,8 @@ export {
   withRealtimeActionSink,
 } from "./realtime";
 export type {
+  HotkeyOptions,
+  RemapOptions,
   RealtimeActionSink,
   RealtimeOptions,
   RealtimeRegistration,

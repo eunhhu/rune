@@ -147,3 +147,11 @@ export enum InputSource {
   Synthetic = 1,
   Any = 2,
 }
+
+/** Logical modifier groups. Left and right variants satisfy the same group. */
+export enum Modifier {
+  Control = 1 << 0,
+  Shift = 1 << 1,
+  Alt = 1 << 2,
+  Meta = 1 << 3,
+}

@@ -1,8 +1,33 @@
-import type { Key, MouseButton } from "./keys";
+import type { Key, Modifier, MouseButton } from "./keys";
 import { InputSource } from "./keys";
+import { parseHotkey } from "./hotkey";
 
 export interface RealtimeOptions {
   source?: InputSource;
+  /** Suppress the original physical transition when the native platform supports it. */
+  consume?: boolean;
+  /** Logical modifier groups required by this trigger. */
+  modifiers?: Modifier;
+  /** Reject additional logical modifiers. Default false for low-level on* registrations. */
+  exactModifiers?: boolean;
+  /** Run on OS key-repeat transitions. Default true. */
+  repeat?: boolean;
+  /** Native boolean-state gate. The compiler evaluates this before action and suppression. */
+  when?: () => boolean;
+}
+
+export interface HotkeyOptions extends Omit<RealtimeOptions, "modifiers"> {
+  /** Reject additional logical modifiers. Default true for string hotkeys. */
+  exactModifiers?: boolean;
+  /** Trigger transition. Default `down`. */
+  edge?: "down" | "up";
+}
+
+export interface RemapOptions {
+  source?: InputSource;
+  repeat?: boolean;
+  /** Native boolean-state gate applied to both source transitions. */
+  when?: () => boolean;
 }
 
 export interface RealtimeRegistration {
@@ -10,6 +35,11 @@ export interface RealtimeRegistration {
   readonly edge: "down" | "up";
   readonly code: number;
   readonly source: InputSource;
+  readonly consume: boolean;
+  readonly modifiers: number;
+  readonly exactModifiers: boolean;
+  readonly repeat: boolean;
+  readonly when?: () => boolean;
   readonly handler: () => void;
 }
 
@@ -27,7 +57,16 @@ function register(
     edge,
     code,
     source: options?.source ?? InputSource.Physical,
-    handler,
+    consume: options?.consume ?? false,
+    modifiers: options?.modifiers ?? 0,
+    exactModifiers: options?.exactModifiers ?? false,
+    repeat: options?.repeat ?? true,
+    ...(options?.when ? { when: options.when } : {}),
+    handler: options?.when
+      ? () => {
+          if (options.when?.()) handler();
+        }
+      : handler,
   });
 }
 
@@ -51,7 +90,46 @@ export const rt = Object.freeze({
   onMouseUp(button: MouseButton, handler: () => void, options?: RealtimeOptions): void {
     register("mouse", "up", button, handler, options);
   },
+
+  /** Portable, statically compiled chord. String hotkeys consume and match exactly by default. */
+  hotkey(chord: string, handler: () => void, options: HotkeyOptions = {}): void {
+    const parsed = parseHotkey(chord);
+    register(parsed.device, options.edge ?? "down", parsed.code, handler, {
+      ...options,
+      modifiers: parsed.modifiers,
+      consume: options.consume ?? true,
+      exactModifiers: options.exactModifiers ?? true,
+    });
+  },
+
+  /** One-to-one keyboard remap with paired down/up transitions and original-input suppression. */
+  remap(from: Key | string, to: Key | string, options: RemapOptions = {}): void {
+    const sourceKey = remapKey(from, "source");
+    const targetKey = remapKey(to, "target");
+    const triggerOptions: RealtimeOptions = {
+      source: options.source ?? InputSource.Physical,
+      consume: true,
+      repeat: options.repeat ?? true,
+      ...(options.when ? { when: options.when } : {}),
+    };
+    register("keyboard", "down", sourceKey, () => keyDown(targetKey), triggerOptions);
+    register("keyboard", "up", sourceKey, () => keyUp(targetKey), triggerOptions);
+  },
 });
+
+function remapKey(value: Key | string, label: "source" | "target"): Key {
+  if (typeof value === "number") {
+    if (!Number.isInteger(value) || value < 0 || value > 0xff) {
+      throw new RangeError(`remap ${label} key must be an integer between 0 and 255`);
+    }
+    return value;
+  }
+  const parsed = parseHotkey(value);
+  if (parsed.device !== "keyboard" || parsed.modifiers !== 0) {
+    throw new SyntaxError(`remap ${label} must name one keyboard key`);
+  }
+  return parsed.code as Key;
+}
 
 export function getFallbackRealtimeRegistrations(): readonly RealtimeRegistration[] {
   return fallbackRegistrations;

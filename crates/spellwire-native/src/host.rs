@@ -2,7 +2,7 @@ use core::{ffi::c_char, mem, ptr, ptr::NonNull, slice};
 use std::{
     sync::{
         atomic::{AtomicI32, Ordering},
-        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
         Arc, Mutex, OnceLock,
     },
     thread::{self, JoinHandle},
@@ -14,9 +14,12 @@ use spellwire_core::{
     OutputEvent, Program, Runtime, RuntimeConfig,
 };
 
-use crate::platform::{self, Observer, PlatformError, PlatformInjector};
+use crate::platform::{
+    self, input_channel, InputPolicy, InputPolicySnapshot, InputReceiveError, InputReceiver,
+    Observer, PlatformError, PlatformInjector,
+};
 
-const INPUT_CHANNEL_CAPACITY: usize = 1024;
+const INPUT_QUEUE_CAPACITY: usize = 1024;
 const COMMAND_CHANNEL_CAPACITY: usize = 64;
 const MAX_COMMAND_LATENCY: Duration = Duration::from_millis(5);
 
@@ -164,6 +167,26 @@ struct TrackingInjector {
     mouse: [bool; 5],
 }
 
+struct PolicyPublisher {
+    policy: Arc<InputPolicy>,
+    snapshot: InputPolicySnapshot,
+}
+
+impl PolicyPublisher {
+    fn new(policy: Arc<InputPolicy>, runtime: &Runtime) -> Self {
+        let snapshot = InputPolicySnapshot::new(runtime.program(), runtime.state());
+        Self { policy, snapshot }
+    }
+
+    fn synchronize(&mut self, runtime: &Runtime) {
+        self.snapshot.synchronize(&self.policy, runtime.program(), runtime.state());
+    }
+
+    fn replace(&mut self, runtime: &Runtime) {
+        self.snapshot.replace(&self.policy, runtime.program(), runtime.state());
+    }
+}
+
 impl TrackingInjector {
     fn new(inner: PlatformInjector) -> Self {
         Self { inner, keys: [false; 256], mouse: [false; 5] }
@@ -290,8 +313,9 @@ impl SpellwireHost {
                 return STATUS_PLATFORM;
             }
         };
-        let (input_sender, input_receiver) = mpsc::sync_channel(INPUT_CHANNEL_CAPACITY);
-        let observer = match platform::start_observer(input_sender) {
+        let (input_sender, input_receiver) = input_channel(INPUT_QUEUE_CAPACITY);
+        let policy = Arc::new(InputPolicy::new(&state.program));
+        let observer = match platform::start_observer(input_sender, Arc::clone(&policy)) {
             Ok(observer) => observer,
             Err(error) => {
                 self.set_error(error.to_string());
@@ -303,7 +327,14 @@ impl SpellwireHost {
         let worker_error = Arc::clone(&self.last_error);
         let worker =
             match thread::Builder::new().name("spellwire-runtime".into()).spawn(move || {
-                run_worker(program, injector, input_receiver, command_receiver, &worker_error);
+                run_worker(
+                    program,
+                    injector,
+                    input_receiver,
+                    command_receiver,
+                    policy,
+                    &worker_error,
+                );
             }) {
                 Ok(worker) => worker,
                 Err(error) => {
@@ -347,8 +378,9 @@ impl Drop for SpellwireHost {
 fn run_worker(
     program: Program,
     injector: PlatformInjector,
-    inputs: Receiver<InputEvent>,
+    inputs: InputReceiver,
     commands: Receiver<HostCommand>,
+    policy: Arc<InputPolicy>,
     last_error: &Mutex<String>,
 ) {
     let Ok(mut runtime) = Runtime::new(program, RuntimeConfig::default()) else {
@@ -358,6 +390,7 @@ fn run_worker(
     let mut injector = TrackingInjector::new(injector);
     let mut scheduler = ContinuationScheduler::default();
     let mut input_ring: Option<DynamicRing> = None;
+    let mut policy = PolicyPublisher::new(policy, &runtime);
 
     'worker: loop {
         loop {
@@ -378,7 +411,11 @@ fn run_worker(
                     let _ = reply.send(runtime.get_state(slot));
                 }
                 Ok(HostCommand::SetState { slot, value, reply }) => {
-                    let _ = reply.send(runtime.set_state(slot, value));
+                    let updated = runtime.set_state(slot, value);
+                    if updated {
+                        policy.synchronize(&runtime);
+                    }
+                    let _ = reply.send(updated);
                 }
                 Ok(HostCommand::SnapshotState { output, reply }) => {
                     let _ = reply.send(output.write(runtime.state()));
@@ -388,8 +425,9 @@ fn run_worker(
                         &mut runtime,
                         &mut scheduler,
                         &mut injector,
-                        program,
+                        &program,
                         preserve_state,
+                        &mut policy,
                         last_error,
                     );
                     let _ = reply.send(status);
@@ -405,6 +443,7 @@ fn run_worker(
                         &mut injector,
                         last_error,
                     );
+                    policy.synchronize(&runtime);
                     let _ = reply.send(status);
                 }
                 Ok(HostCommand::SetInputRing { ring, reply }) => {
@@ -416,19 +455,8 @@ fn run_worker(
             }
         }
 
-        let now = Instant::now();
-        if let Err(error) = runtime.poll_ready(&mut scheduler, now, &mut injector) {
-            set_worker_error(last_error, &error.to_string());
-            if let Err(release_error) = injector.release_all() {
-                set_worker_error(last_error, &release_error.to_string());
-            }
-        }
-        let timeout = scheduler.next_deadline().map_or(MAX_COMMAND_LATENCY, |deadline| {
-            deadline
-                .checked_duration_since(Instant::now())
-                .unwrap_or(Duration::ZERO)
-                .min(MAX_COMMAND_LATENCY)
-        });
+        let timeout =
+            poll_runtime(&mut runtime, &mut scheduler, &mut injector, &mut policy, last_error);
         match inputs.recv_timeout(timeout) {
             Ok(event) => {
                 if let Some(ring) = &input_ring {
@@ -441,17 +469,61 @@ fn run_worker(
                     &mut injector,
                     last_error,
                 );
+                policy.synchronize(&runtime);
             }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                set_worker_error(last_error, "platform observer input channel disconnected");
+            Err(InputReceiveError::Timeout) => {}
+            Err(InputReceiveError::Disconnected) => {
+                set_worker_error(last_error, "platform observer input queue disconnected");
                 break;
+            }
+            Err(InputReceiveError::Overflow) => {
+                recover_input_overflow(&mut runtime, &mut scheduler, &mut injector, last_error);
             }
         }
     }
     if let Err(error) = injector.release_all() {
         set_worker_error(last_error, &error.to_string());
     }
+}
+
+fn recover_input_overflow(
+    runtime: &mut Runtime,
+    scheduler: &mut ContinuationScheduler,
+    injector: &mut TrackingInjector,
+    last_error: &Mutex<String>,
+) {
+    scheduler.clear();
+    runtime.reset_input_tracking();
+    match injector.release_all() {
+        Ok(()) => set_worker_error(
+            last_error,
+            "input queue overflow; dropped backlog and released synthetic input",
+        ),
+        Err(error) => set_worker_error(last_error, &error.to_string()),
+    }
+}
+
+fn poll_runtime(
+    runtime: &mut Runtime,
+    scheduler: &mut ContinuationScheduler,
+    injector: &mut TrackingInjector,
+    policy: &mut PolicyPublisher,
+    last_error: &Mutex<String>,
+) -> Duration {
+    let now = Instant::now();
+    if let Err(error) = runtime.poll_ready(scheduler, now, injector) {
+        set_worker_error(last_error, &error.to_string());
+        if let Err(release_error) = injector.release_all() {
+            set_worker_error(last_error, &release_error.to_string());
+        }
+    }
+    policy.synchronize(runtime);
+    scheduler.next_deadline().map_or(MAX_COMMAND_LATENCY, |deadline| {
+        deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or(Duration::ZERO)
+            .min(MAX_COMMAND_LATENCY)
+    })
 }
 
 fn enqueue_and_poll(
@@ -482,11 +554,12 @@ fn reload_runtime(
     runtime: &mut Runtime,
     scheduler: &mut ContinuationScheduler,
     injector: &mut TrackingInjector,
-    program: Program,
+    program: &Program,
     preserve_state: bool,
+    policy: &mut PolicyPublisher,
     last_error: &Mutex<String>,
 ) -> i32 {
-    let Ok(mut replacement) = Runtime::new(program, RuntimeConfig::default()) else {
+    let Ok(mut replacement) = Runtime::new(program.clone(), RuntimeConfig::default()) else {
         return STATUS_RUNTIME;
     };
     if preserve_state {
@@ -502,6 +575,7 @@ fn reload_runtime(
     }
     scheduler.clear();
     *runtime = replacement;
+    policy.replace(runtime);
     STATUS_OK
 }
 
@@ -827,7 +901,20 @@ pub extern "C" fn spellwire_request_permissions() -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use spellwire_core::{key, Handler, Instruction, Opcode, SourceFilter, Trigger};
+
     use super::*;
+
+    struct RecordingPlatformInjector(Arc<Mutex<Vec<OutputEvent>>>);
+
+    impl Injector for RecordingPlatformInjector {
+        type Error = PlatformError;
+
+        fn send(&mut self, events: &[OutputEvent]) -> Result<(), Self::Error> {
+            self.0.lock().unwrap().extend_from_slice(events);
+            Ok(())
+        }
+    }
 
     #[test]
     fn dynamic_ring_publishes_fixed_event_records_and_counts_overflow() {
@@ -851,5 +938,47 @@ mod tests {
         assert_eq!(words[DYNAMIC_RING_DROPPED].load(Ordering::Relaxed), 1);
         assert_eq!(words[DYNAMIC_RING_HEADER_WORDS].load(Ordering::Relaxed), 0);
         assert_eq!(words[DYNAMIC_RING_HEADER_WORDS + 1].load(Ordering::Relaxed), 0x04);
+    }
+
+    #[test]
+    fn overflow_recovery_releases_tracked_synthetic_downs() {
+        let program = Program {
+            initial_state: Box::new([]),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::Q,
+                    edge: Edge::Down,
+                    source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: spellwire_core::NO_STATE_GATE,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![Instruction::new(Opcode::Halt)].into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 8,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let mut scheduler = ContinuationScheduler::default();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut injector =
+            TrackingInjector::new(Box::new(RecordingPlatformInjector(Arc::clone(&events))));
+        injector.send(&[OutputEvent::Key { code: key::E, down: true }]).unwrap();
+        let last_error = Mutex::new(String::new());
+
+        recover_input_overflow(&mut runtime, &mut scheduler, &mut injector, &last_error);
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                OutputEvent::Key { code: key::E, down: true },
+                OutputEvent::Key { code: key::E, down: false },
+            ]
+        );
+        assert!(last_error.lock().unwrap().contains("released synthetic input"));
     }
 }

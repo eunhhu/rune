@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { Key, tapKey, withRealtimeActionSink } from "../src/index";
+import {
+  Key,
+  getFallbackRealtimeRegistrations,
+  rt,
+  tapKey,
+  withRealtimeActionSink,
+} from "../src/index";
 
 test("intrinsics have a debuggable JavaScript fallback", () => {
   const events: Array<[number, boolean]> = [];
@@ -22,4 +28,20 @@ test("intrinsics have a debuggable JavaScript fallback", () => {
     [Key.E, true],
     [Key.E, false],
   ]);
+});
+
+test("fallback hotkeys honor state gates", () => {
+  let enabled = false;
+  let hits = 0;
+  const start = getFallbackRealtimeRegistrations().length;
+  rt.hotkey("Ctrl+K", () => {
+    hits += 1;
+  }, { when: () => enabled });
+  const registration = getFallbackRealtimeRegistrations()[start];
+
+  registration?.handler();
+  expect(hits).toBe(0);
+  enabled = true;
+  registration?.handler();
+  expect(hits).toBe(1);
 });

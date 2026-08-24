@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Key, MouseButton } from "../src/index";
-import { compileSource, Opcode, SourceFilter, SpellwireCompileError } from "../src/index";
+import {
+  compileSource,
+  Modifier,
+  Opcode,
+  SourceFilter,
+  SpellwireCompileError,
+  TriggerFlag,
+} from "../src/index";
 
 const stateful = `
 import { Key, MouseButton, clickMouse, keyDown, keyUp, rt, sleepUs } from "../src/index";
@@ -84,6 +91,74 @@ describe("Spellwire TypeScript AOT compiler", () => {
     expect(shorthand.module.handlers[0]?.source).toBe(SourceFilter.Synthetic);
     expect(quoted.module.handlers[0]?.source).toBe(SourceFilter.Any);
     expect(computed.module.handlers[0]?.source).toBe(SourceFilter.Physical);
+  });
+
+  test("lowers portable chords and paired consuming remaps", () => {
+    const result = compileSource(`
+      import { Key, rt, tapKey } from "../src/index";
+      const chord = "Ctrl+Shift+K";
+      rt.hotkey(chord, () => tapKey(Key.E), { repeat: false });
+      rt.remap("CapsLock", "Escape");
+    `);
+
+    expect(result.module.handlers).toHaveLength(3);
+    expect(result.module.handlers[0]).toMatchObject({
+      code: Key.K,
+      modifiers: Modifier.Control | Modifier.Shift,
+      flags: TriggerFlag.Consume | TriggerFlag.ExactModifiers | TriggerFlag.IgnoreRepeat,
+    });
+    expect(result.module.handlers.slice(1).map((handler) => handler.code)).toEqual([
+      Key.CapsLock,
+      Key.CapsLock,
+    ]);
+    expect(result.module.handlers.slice(1).every(
+      (handler) => (handler.flags & TriggerFlag.Consume) !== 0,
+    )).toBe(true);
+    expect(result.module.code.some(
+      (instruction) => instruction.opcode === Opcode.KeyDown && instruction.a === Key.Escape,
+    )).toBe(true);
+    expect(result.module.code.some(
+      (instruction) => instruction.opcode === Opcode.KeyUp && instruction.a === Key.Escape,
+    )).toBe(true);
+  });
+
+  test("lowers state-gated release hotkeys and conditional remaps", () => {
+    const result = compileSource(`
+      import { Key, rt, tapKey } from "../src/index";
+      let enabled = true;
+      rt.hotkey("Ctrl+K", () => tapKey(Key.E), { edge: "up", when: () => enabled });
+      rt.remap(Key.CapsLock, Key.Escape, { when: () => !enabled });
+    `);
+
+    expect(result.module.handlers[0]).toMatchObject({
+      edge: 1,
+      gate: 0,
+      flags: TriggerFlag.Consume | TriggerFlag.ExactModifiers,
+    });
+    expect(result.module.handlers.slice(1).every(
+      (handler) => handler.gate === 0 && (handler.flags & TriggerFlag.GateInverted) !== 0,
+    )).toBe(true);
+  });
+
+  test("rejects dynamic or malformed chord policies", () => {
+    expect(() => compileSource(`
+      import { rt } from "../src/index";
+      const chord = process.argv[2];
+      rt.hotkey(chord, () => {});
+    `)).toThrow("constant string");
+    expect(() => compileSource(`
+      import { rt } from "../src/index";
+      rt.hotkey("Ctrl+K+L", () => {});
+    `)).toThrow("multiple trigger keys");
+    expect(() => compileSource(`
+      import { Key, rt } from "../src/index";
+      rt.remap(Key.A, Key.B, { consume: false });
+    `)).toThrow("Unsupported realtime handler option");
+    expect(() => compileSource(`
+      import { rt } from "../src/index";
+      let mode = 1;
+      rt.hotkey("K", () => {}, { when: () => mode > 0 });
+    `)).toThrow("native boolean state");
   });
 
   test("rejects source option shapes that would otherwise change trigger semantics", () => {

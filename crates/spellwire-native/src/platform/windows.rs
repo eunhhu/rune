@@ -2,14 +2,14 @@ use core::{mem::size_of, ptr};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicPtr, Ordering},
-        mpsc::{sync_channel, SyncSender, TrySendError},
+        mpsc::{sync_channel, SyncSender},
         Arc,
     },
     thread,
 };
 
 use spellwire_core::{
-    Edge, Injector, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent,
+    Edge, Injector, InputDevice, InputEvent, InputSource, InputState, MouseButton, OutputEvent,
 };
 use windows_sys::Win32::{
     System::{
@@ -37,14 +37,24 @@ use windows_sys::Win32::{
     },
 };
 
-use super::{Observer, PlatformError, PlatformInjector, PERMISSION_INJECT, PERMISSION_OBSERVE};
+use super::{
+    InputPolicy, InputSender, Observer, PlatformError, PlatformInjector, PERMISSION_INJECT,
+    PERMISSION_OBSERVE,
+};
 
 const SPELLWIRE_EVENT_TAG: usize = 0x5350_454c_4c57_4952;
 const HC_ACTION: i32 = 0;
 const XBUTTON1: u32 = 1;
 const XBUTTON2: u32 = 2;
 
-static OBSERVER_SENDER: AtomicPtr<SyncSender<InputEvent>> = AtomicPtr::new(ptr::null_mut());
+struct ObserverContext {
+    sender: InputSender,
+    policy: Arc<InputPolicy>,
+    input_state: InputState,
+    consumed_state: InputState,
+}
+
+static OBSERVER_CONTEXT: AtomicPtr<ObserverContext> = AtomicPtr::new(ptr::null_mut());
 
 struct WindowsInjector {
     inputs: Vec<INPUT>,
@@ -162,13 +172,16 @@ pub fn create_injector() -> Result<PlatformInjector, PlatformError> {
     }))
 }
 
-pub fn start_observer(sender: SyncSender<InputEvent>) -> Result<Observer, PlatformError> {
+pub fn start_observer(
+    sender: InputSender,
+    policy: Arc<InputPolicy>,
+) -> Result<Observer, PlatformError> {
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
     let (setup_sender, setup_receiver) = sync_channel(1);
     let join = thread::Builder::new()
         .name("spellwire-windows-observer".into())
-        .spawn(move || run_observer(sender, worker_stop, setup_sender))?;
+        .spawn(move || run_observer(sender, policy, worker_stop, setup_sender))?;
     match setup_receiver.recv() {
         Ok(Ok(thread_id)) => Ok(Observer::new_with_wake(
             stop,
@@ -193,17 +206,23 @@ pub fn start_observer(sender: SyncSender<InputEvent>) -> Result<Observer, Platfo
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_observer(
-    sender: SyncSender<InputEvent>,
+    sender: InputSender,
+    policy: Arc<InputPolicy>,
     stop: Arc<AtomicBool>,
     setup: SyncSender<Result<u32, &'static str>>,
 ) -> Result<(), PlatformError> {
-    let sender = Box::into_raw(Box::new(sender));
-    if OBSERVER_SENDER
-        .compare_exchange(ptr::null_mut(), sender, Ordering::AcqRel, Ordering::Acquire)
+    let context = Box::into_raw(Box::new(ObserverContext {
+        sender,
+        policy,
+        input_state: InputState::new(),
+        consumed_state: InputState::new(),
+    }));
+    if OBSERVER_CONTEXT
+        .compare_exchange(ptr::null_mut(), context, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
-        // SAFETY: This thread still uniquely owns the unpublished sender allocation.
-        unsafe { drop(Box::from_raw(sender)) };
+        // SAFETY: This thread still uniquely owns the unpublished context allocation.
+        unsafe { drop(Box::from_raw(context)) };
         let message = "only one Windows observer may run per process";
         let _ = setup.send(Err(message));
         return Err(PlatformError::Initialization(message));
@@ -220,7 +239,7 @@ fn run_observer(
         )
     };
     if module_status == 0 {
-        clear_sender(sender);
+        clear_context(context);
         let message = "GetModuleHandleExW failed for the Spellwire native library";
         let _ = setup.send(Err(message));
         return Err(PlatformError::Io(std::io::Error::last_os_error()));
@@ -229,7 +248,7 @@ fn run_observer(
     // SAFETY: `module` contains the callback and thread id zero requests a global low-level hook.
     let keyboard = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), module, 0) };
     if keyboard.is_null() {
-        clear_sender(sender);
+        clear_context(context);
         let message = "SetWindowsHookExW failed for the low-level keyboard hook";
         let _ = setup.send(Err(message));
         return Err(PlatformError::Io(std::io::Error::last_os_error()));
@@ -239,7 +258,7 @@ fn run_observer(
     if mouse.is_null() {
         // SAFETY: `keyboard` is a live hook owned by this thread.
         unsafe { UnhookWindowsHookEx(keyboard) };
-        clear_sender(sender);
+        clear_context(context);
         let message = "SetWindowsHookExW failed for the low-level mouse hook";
         let _ = setup.send(Err(message));
         return Err(PlatformError::Io(std::io::Error::last_os_error()));
@@ -268,15 +287,15 @@ fn run_observer(
         UnhookWindowsHookEx(mouse);
         UnhookWindowsHookEx(keyboard);
     }
-    clear_sender(sender);
+    clear_context(context);
     Ok(())
 }
 
-fn clear_sender(sender: *mut SyncSender<InputEvent>) {
-    let previous = OBSERVER_SENDER.swap(ptr::null_mut(), Ordering::AcqRel);
-    if previous == sender {
+fn clear_context(context: *mut ObserverContext) {
+    let previous = OBSERVER_CONTEXT.swap(ptr::null_mut(), Ordering::AcqRel);
+    if previous == context {
         // SAFETY: Hooks are absent, so no callback can read this unique allocation now.
-        unsafe { drop(Box::from_raw(sender)) };
+        unsafe { drop(Box::from_raw(context)) };
     }
 }
 
@@ -291,7 +310,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: usize, lparam: isize)
             let extended = data.flags & LLKHF_EXTENDED != 0;
             let scan = u16::try_from(data.scanCode).unwrap_or_default();
             if let Some(hid) = scan_to_hid(scan, extended, data.vkCode) {
-                send_observed(InputEvent {
+                if send_observed(InputEvent {
                     device: InputDevice::Keyboard,
                     code: hid,
                     edge: if down { Edge::Down } else { Edge::Up },
@@ -300,7 +319,9 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: usize, lparam: isize)
                     } else {
                         InputSource::Physical
                     },
-                });
+                }) {
+                    return 1;
+                }
             }
         }
     }
@@ -333,7 +354,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: usize, lparam: isize) ->
             _ => None,
         };
         if let Some((button, edge)) = translated {
-            send_observed(InputEvent {
+            if send_observed(InputEvent {
                 device: InputDevice::MouseButton,
                 code: button as u16,
                 edge,
@@ -342,22 +363,39 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: usize, lparam: isize) ->
                 } else {
                     InputSource::Physical
                 },
-            });
+            }) {
+                return 1;
+            }
         }
     }
     // SAFETY: Passing the event onward is required for a passive low-level hook.
     unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) }
 }
 
-fn send_observed(event: InputEvent) {
-    let sender = OBSERVER_SENDER.load(Ordering::Acquire);
-    if sender.is_null() {
-        return;
+fn send_observed(event: InputEvent) -> bool {
+    let context = OBSERVER_CONTEXT.load(Ordering::Acquire);
+    if context.is_null() {
+        return false;
     }
-    // SAFETY: The observer owns the allocation until hooks are removed, and this callback runs
-    // while a hook is active.
-    match unsafe { &*sender }.try_send(event) {
-        Ok(()) | Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {}
+    // SAFETY: The observer owns the context until hooks are removed. Both hooks dispatch on the
+    // installing thread, so callback access to input_state is serialized.
+    let context = unsafe { &mut *context };
+    let modifiers = context.input_state.modifiers_for_event(event);
+    let repeated = event.edge == Edge::Down
+        && context.input_state.held_for_source(event.device, event.code, event.source);
+    let paired = context.consumed_state.held_for_source(event.device, event.code, event.source);
+    let consume = paired || context.policy.should_consume(event, modifiers, repeated);
+    context.input_state.apply(event);
+    if context.sender.try_send(event) {
+        if consume || event.edge == Edge::Up {
+            context.consumed_state.apply(event);
+        }
+        consume
+    } else {
+        if event.edge == Edge::Up {
+            context.consumed_state.apply(event);
+        }
+        false
     }
 }
 

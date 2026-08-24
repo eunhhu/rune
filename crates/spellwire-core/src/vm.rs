@@ -5,8 +5,9 @@ use std::{
 };
 
 use crate::{
-    Edge, HandlerTable, InputDevice, InputEvent, MouseButton, Opcode, OutputEvent, Program,
-    ProgramError,
+    key, Edge, HandlerTable, InputDevice, InputEvent, InputSource, MouseButton, Opcode,
+    OutputEvent, Program, ProgramError, MODIFIER_ALT, MODIFIER_CONTROL, MODIFIER_META,
+    MODIFIER_SHIFT, TRIGGER_CONSUME,
 };
 
 pub const MAX_STACK: usize = 256;
@@ -129,34 +130,35 @@ impl std::error::Error for SchedulerFull {}
 
 #[derive(Debug, Clone)]
 pub struct InputState {
-    keyboard: [u64; 4],
-    mouse: u16,
+    keyboard: [[u64; 4]; 2],
+    mouse: [u16; 2],
 }
 
 impl InputState {
     #[must_use]
     pub const fn new() -> Self {
-        Self { keyboard: [0; 4], mouse: 0 }
+        Self { keyboard: [[0; 4]; 2], mouse: [0; 2] }
     }
 
     pub fn apply(&mut self, event: InputEvent) {
         let down = event.edge == Edge::Down;
+        let source = event.source as usize;
         match event.device {
             InputDevice::Keyboard if event.code < 256 => {
                 let word = usize::from(event.code / 64);
                 let bit = u32::from(event.code % 64);
                 if down {
-                    self.keyboard[word] |= 1_u64 << bit;
+                    self.keyboard[source][word] |= 1_u64 << bit;
                 } else {
-                    self.keyboard[word] &= !(1_u64 << bit);
+                    self.keyboard[source][word] &= !(1_u64 << bit);
                 }
             }
             InputDevice::MouseButton if event.code < 16 => {
                 let mask = 1_u16 << event.code;
                 if down {
-                    self.mouse |= mask;
+                    self.mouse[source] |= mask;
                 } else {
-                    self.mouse &= !mask;
+                    self.mouse[source] &= !mask;
                 }
             }
             _ => {}
@@ -165,14 +167,71 @@ impl InputState {
 
     #[must_use]
     pub fn held(&self, device: InputDevice, code: u16) -> bool {
+        self.held_for_source(device, code, InputSource::Physical)
+            || self.held_for_source(device, code, InputSource::Synthetic)
+    }
+
+    #[must_use]
+    pub fn held_for_source(&self, device: InputDevice, code: u16, source: InputSource) -> bool {
+        let source = source as usize;
         match device {
             InputDevice::Keyboard if code < 256 => {
                 let word = usize::from(code / 64);
                 let bit = u32::from(code % 64);
-                self.keyboard[word] & (1_u64 << bit) != 0
+                self.keyboard[source][word] & (1_u64 << bit) != 0
             }
-            InputDevice::MouseButton if code < 16 => self.mouse & (1_u16 << code) != 0,
+            InputDevice::MouseButton if code < 16 => self.mouse[source] & (1_u16 << code) != 0,
             _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn modifiers(&self, source: InputSource) -> u8 {
+        let mut modifiers = 0;
+        if self.held_for_source(InputDevice::Keyboard, key::LEFT_CONTROL, source)
+            || self.held_for_source(InputDevice::Keyboard, key::RIGHT_CONTROL, source)
+        {
+            modifiers |= MODIFIER_CONTROL;
+        }
+        if self.held_for_source(InputDevice::Keyboard, key::LEFT_SHIFT, source)
+            || self.held_for_source(InputDevice::Keyboard, key::RIGHT_SHIFT, source)
+        {
+            modifiers |= MODIFIER_SHIFT;
+        }
+        if self.held_for_source(InputDevice::Keyboard, key::LEFT_ALT, source)
+            || self.held_for_source(InputDevice::Keyboard, key::RIGHT_ALT, source)
+        {
+            modifiers |= MODIFIER_ALT;
+        }
+        if self.held_for_source(InputDevice::Keyboard, key::LEFT_META, source)
+            || self.held_for_source(InputDevice::Keyboard, key::RIGHT_META, source)
+        {
+            modifiers |= MODIFIER_META;
+        }
+        modifiers
+    }
+
+    /// Returns logical modifiers for trigger matching, excluding the current modifier key itself.
+    /// The opposite left/right key still satisfies the logical modifier group.
+    #[must_use]
+    #[inline]
+    pub fn modifiers_for_event(&self, event: InputEvent) -> u8 {
+        let modifiers = self.modifiers(event.source);
+        let (group, opposite) = match event.code {
+            key::LEFT_CONTROL => (MODIFIER_CONTROL, key::RIGHT_CONTROL),
+            key::RIGHT_CONTROL => (MODIFIER_CONTROL, key::LEFT_CONTROL),
+            key::LEFT_SHIFT => (MODIFIER_SHIFT, key::RIGHT_SHIFT),
+            key::RIGHT_SHIFT => (MODIFIER_SHIFT, key::LEFT_SHIFT),
+            key::LEFT_ALT => (MODIFIER_ALT, key::RIGHT_ALT),
+            key::RIGHT_ALT => (MODIFIER_ALT, key::LEFT_ALT),
+            key::LEFT_META => (MODIFIER_META, key::RIGHT_META),
+            key::RIGHT_META => (MODIFIER_META, key::LEFT_META),
+            _ => return modifiers,
+        };
+        if self.held_for_source(InputDevice::Keyboard, opposite, event.source) {
+            modifiers
+        } else {
+            modifiers & !group
         }
     }
 }
@@ -321,6 +380,8 @@ pub struct Runtime {
     handlers: HandlerTable,
     state: Box<[i64]>,
     input_state: InputState,
+    release_arms: Box<[u8]>,
+    has_consuming_releases: bool,
     config: RuntimeConfig,
 }
 
@@ -335,12 +396,29 @@ impl Runtime {
         validate_program(&program)?;
         let handlers = HandlerTable::build(&program.handlers)?;
         let state = program.initial_state.clone();
-        Ok(Self { program, handlers, state, input_state: InputState::new(), config })
+        let release_arms = vec![0; program.handlers.len()].into_boxed_slice();
+        let has_consuming_releases = program.handlers.iter().any(|handler| {
+            handler.trigger.edge == Edge::Up && handler.trigger.flags & TRIGGER_CONSUME != 0
+        });
+        Ok(Self {
+            program,
+            handlers,
+            state,
+            input_state: InputState::new(),
+            release_arms,
+            has_consuming_releases,
+            config,
+        })
     }
 
     #[must_use]
     pub fn state(&self) -> &[i64] {
         &self.state
+    }
+
+    #[must_use]
+    pub fn program(&self) -> &Program {
+        &self.program
     }
 
     pub fn set_state(&mut self, slot: usize, value: i64) -> bool {
@@ -356,6 +434,63 @@ impl Runtime {
         self.state.get(slot).copied()
     }
 
+    /// Clears held-input and release-latch bookkeeping after an observer queue overflow.
+    /// Persistent program state is intentionally preserved.
+    pub fn reset_input_tracking(&mut self) {
+        self.input_state = InputState::new();
+        self.release_arms.fill(0);
+    }
+
+    #[inline]
+    fn arm_consuming_releases(&mut self, event: InputEvent, modifiers: u8, repeated: bool) {
+        if !self.has_consuming_releases || event.edge != Edge::Down || repeated {
+            return;
+        }
+        let release = InputEvent { edge: Edge::Up, ..event };
+        let source_bit = 1_u8 << event.source as u8;
+        for handler_id in self.handlers.matching(release) {
+            let index = usize::from(handler_id);
+            let trigger = self.program.handlers[index].trigger;
+            if trigger.flags & TRIGGER_CONSUME != 0
+                && trigger.matches_context(modifiers, false)
+                && trigger.matches_gate(&self.state)
+            {
+                self.release_arms[index] |= source_bit;
+            }
+        }
+    }
+
+    #[inline]
+    fn handler_matches(
+        &self,
+        handler_id: u16,
+        event: InputEvent,
+        modifiers: u8,
+        repeated: bool,
+    ) -> bool {
+        let index = usize::from(handler_id);
+        let trigger = self.program.handlers[index].trigger;
+        if event.edge == Edge::Up && trigger.flags & TRIGGER_CONSUME != 0 {
+            self.release_arms[index] & (1_u8 << event.source as u8) != 0
+        } else {
+            trigger.matches_context(modifiers, repeated) && trigger.matches_gate(&self.state)
+        }
+    }
+
+    #[inline]
+    fn clear_consuming_release_arms(&mut self, event: InputEvent) {
+        if !self.has_consuming_releases || event.edge != Edge::Up {
+            return;
+        }
+        let source_mask = !(1_u8 << event.source as u8);
+        for handler_id in self.handlers.matching(event) {
+            let index = usize::from(handler_id);
+            if self.program.handlers[index].trigger.flags & TRIGGER_CONSUME != 0 {
+                self.release_arms[index] &= source_mask;
+            }
+        }
+    }
+
     /// Applies one input event and executes every matching handler.
     ///
     /// # Errors
@@ -368,12 +503,34 @@ impl Runtime {
         injector: &mut I,
         scratch: &mut VmScratch,
     ) -> Result<DispatchReport, DispatchError<I::Error>> {
+        let modifiers = self.input_state.modifiers_for_event(event);
+        let repeated = event.edge == Edge::Down
+            && self.input_state.held_for_source(event.device, event.code, event.source);
+        self.arm_consuming_releases(event, modifiers, repeated);
         self.input_state.apply(event);
 
         let mut report = DispatchReport::default();
-        let Runtime { program, handlers, state, input_state, config } = self;
+        let Runtime {
+            program,
+            handlers,
+            state,
+            input_state,
+            release_arms,
+            has_consuming_releases: _,
+            config,
+        } = self;
         for handler_id in handlers.matching(event) {
-            let entry = program.handlers[usize::from(handler_id)].entry;
+            let index = usize::from(handler_id);
+            let trigger = program.handlers[index].trigger;
+            let matches = if event.edge == Edge::Up && trigger.flags & TRIGGER_CONSUME != 0 {
+                release_arms[index] & (1_u8 << event.source as u8) != 0
+            } else {
+                trigger.matches_context(modifiers, repeated) && trigger.matches_gate(state)
+            };
+            if !matches {
+                continue;
+            }
+            let entry = program.handlers[index].entry;
             scratch.reset(usize::from(program.local_count));
             let mut cursor = ExecutionCursor::new(handler_id, event, entry, Instant::now());
             let execution = loop {
@@ -395,9 +552,11 @@ impl Runtime {
             let execution = match execution {
                 Ok(value) => value,
                 Err(ExecutionFailure::Vm(source)) => {
+                    self.clear_consuming_release_arms(event);
                     return Err(DispatchError::Vm { handler_id, source });
                 }
                 Err(ExecutionFailure::Inject(source)) => {
+                    self.clear_consuming_release_arms(event);
                     return Err(DispatchError::Inject { handler_id, source });
                 }
             };
@@ -405,6 +564,7 @@ impl Runtime {
             report.instructions = report.instructions.saturating_add(execution.instructions);
             report.output_events = report.output_events.saturating_add(execution.output_events);
         }
+        self.clear_consuming_release_arms(event);
         Ok(report)
     }
 
@@ -422,10 +582,19 @@ impl Runtime {
         scheduler: &mut ContinuationScheduler,
         now: Instant,
     ) -> Result<u16, SchedulerFull> {
+        let modifiers = self.input_state.modifiers_for_event(event);
+        let repeated = event.edge == Edge::Down
+            && self.input_state.held_for_source(event.device, event.code, event.source);
+        self.arm_consuming_releases(event, modifiers, repeated);
         self.input_state.apply(event);
-        let handler_count = self.handlers.matching(event).count();
+        let handler_count = self
+            .handlers
+            .matching(event)
+            .filter(|handler_id| self.handler_matches(*handler_id, event, modifiers, repeated))
+            .count();
         let available = scheduler.capacity.saturating_sub(scheduler.pending.len());
         if handler_count > available {
+            self.clear_consuming_release_arms(event);
             return Err(SchedulerFull {
                 capacity: scheduler.capacity,
                 pending: scheduler.pending.len(),
@@ -433,7 +602,11 @@ impl Runtime {
             });
         }
 
-        for handler_id in self.handlers.matching(event) {
+        for handler_id in self
+            .handlers
+            .matching(event)
+            .filter(|handler_id| self.handler_matches(*handler_id, event, modifiers, repeated))
+        {
             let entry = self.program.handlers[usize::from(handler_id)].entry;
             let mut scratch = VmScratch::new();
             scratch.reset(usize::from(self.program.local_count));
@@ -442,6 +615,7 @@ impl Runtime {
                 scratch,
             });
         }
+        self.clear_consuming_release_arms(event);
         Ok(u16::try_from(handler_count).unwrap_or(u16::MAX))
     }
 
@@ -762,6 +936,11 @@ pub fn validate_program(program: &Program) -> Result<(), ProgramError> {
     }
 
     for (index, handler) in program.handlers.iter().enumerate() {
+        if handler.trigger.gate != crate::NO_STATE_GATE
+            && usize::from(handler.trigger.gate) >= program.initial_state.len()
+        {
+            return Err(ProgramError::InvalidTrigger(handler.trigger));
+        }
         if handler.entry as usize >= program.code.len() {
             return Err(ProgramError::InvalidEntry { handler: index, entry: handler.entry });
         }
@@ -818,6 +997,23 @@ mod tests {
         }
     }
 
+    fn dispatch_key(
+        runtime: &mut Runtime,
+        injector: &mut RecordingInjector,
+        scratch: &mut VmScratch,
+        code: u16,
+        edge: Edge,
+        source: InputSource,
+    ) {
+        runtime
+            .dispatch(
+                InputEvent { device: InputDevice::Keyboard, code, edge, source },
+                injector,
+                scratch,
+            )
+            .unwrap();
+    }
+
     #[test]
     fn state_and_branch_persist_between_dispatches() {
         // count += 1; if (count >= 2) tap E;
@@ -829,6 +1025,9 @@ mod tests {
                     code: key::Q,
                     edge: Edge::Down,
                     source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: crate::NO_STATE_GATE,
                 },
                 entry: 0,
             }]
@@ -880,6 +1079,9 @@ mod tests {
                     code: key::Q,
                     edge: Edge::Down,
                     source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: crate::NO_STATE_GATE,
                 },
                 entry: 0,
             }]
@@ -921,6 +1123,9 @@ mod tests {
                     code: key::Q,
                     edge: Edge::Down,
                     source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: crate::NO_STATE_GATE,
                 },
                 entry: 0,
             }]
@@ -979,6 +1184,9 @@ mod tests {
                     code: key::Q,
                     edge: Edge::Down,
                     source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: crate::NO_STATE_GATE,
                 },
                 entry: 0,
             }]
@@ -1001,5 +1209,243 @@ mod tests {
         assert_eq!(error, SchedulerFull { capacity: 0, pending: 0, requested: 1 });
         assert!(runtime.input_state.held(InputDevice::Keyboard, key::Q));
         assert_eq!(scheduler.pending(), 0);
+    }
+
+    #[test]
+    fn modifier_trigger_context_excludes_itself_but_keeps_the_opposite_side() {
+        let mut state = InputState::new();
+        let left = InputEvent {
+            device: InputDevice::Keyboard,
+            code: key::LEFT_CONTROL,
+            edge: Edge::Down,
+            source: InputSource::Physical,
+        };
+        assert_eq!(state.modifiers_for_event(left), 0);
+        state.apply(left);
+        assert_eq!(state.modifiers_for_event(left), 0);
+        assert_eq!(state.modifiers_for_event(InputEvent { edge: Edge::Up, ..left }), 0);
+
+        let right = InputEvent { code: key::RIGHT_CONTROL, ..left };
+        state.apply(right);
+        assert_eq!(state.modifiers_for_event(left), crate::MODIFIER_CONTROL);
+    }
+
+    #[test]
+    fn consuming_release_trigger_latches_down_context_and_gate() {
+        let program = Program {
+            initial_state: vec![1].into_boxed_slice(),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::K,
+                    edge: Edge::Up,
+                    source: SourceFilter::Physical,
+                    flags: crate::TRIGGER_CONSUME | crate::TRIGGER_EXACT_MODIFIERS,
+                    modifiers: crate::MODIFIER_CONTROL,
+                    gate: 0,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![
+                Instruction::new(Opcode::KeyDown).with_a(key::E),
+                Instruction::new(Opcode::Halt),
+            ]
+            .into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 8,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let mut injector = RecordingInjector::default();
+        let mut scratch = VmScratch::new();
+
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::LEFT_CONTROL,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        assert!(runtime.set_state(0, 0));
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::LEFT_CONTROL,
+            Edge::Up,
+            InputSource::Physical,
+        );
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Up,
+            InputSource::Physical,
+        );
+        assert_eq!(injector.0, vec![OutputEvent::Key { code: key::E, down: true }]);
+
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        assert!(runtime.set_state(0, 1));
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Up,
+            InputSource::Physical,
+        );
+        assert_eq!(injector.0.len(), 1);
+    }
+
+    #[test]
+    fn modifier_and_repeat_policy_filters_before_vm_execution() {
+        let program = Program {
+            initial_state: Box::new([]),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::K,
+                    edge: Edge::Down,
+                    source: SourceFilter::Physical,
+                    flags: crate::TRIGGER_EXACT_MODIFIERS | crate::TRIGGER_IGNORE_REPEAT,
+                    modifiers: crate::MODIFIER_CONTROL,
+                    gate: crate::NO_STATE_GATE,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![
+                Instruction::new(Opcode::KeyDown).with_a(key::E),
+                Instruction::new(Opcode::Halt),
+            ]
+            .into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 8,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let mut injector = RecordingInjector::default();
+        let mut scratch = VmScratch::new();
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::LEFT_CONTROL,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Up,
+            InputSource::Physical,
+        );
+        assert_eq!(injector.0, vec![OutputEvent::Key { code: key::E, down: true }]);
+
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::LEFT_SHIFT,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        assert_eq!(injector.0.len(), 1);
+    }
+
+    #[test]
+    fn native_state_gate_filters_before_vm_execution() {
+        let program = Program {
+            initial_state: vec![0].into_boxed_slice(),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::K,
+                    edge: Edge::Down,
+                    source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: 0,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![
+                Instruction::new(Opcode::KeyDown).with_a(key::E),
+                Instruction::new(Opcode::Halt),
+            ]
+            .into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 8,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let mut injector = RecordingInjector::default();
+        let mut scratch = VmScratch::new();
+
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        assert!(injector.0.is_empty());
+
+        assert!(runtime.set_state(0, 1));
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::K,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        assert_eq!(injector.0, vec![OutputEvent::Key { code: key::E, down: true }]);
     }
 }
