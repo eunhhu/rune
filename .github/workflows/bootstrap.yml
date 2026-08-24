@@ -3,20 +3,18 @@ name: Materialize source for Spellwire rebrand
 on:
   push:
     branches: ["feat/spellwire-rebrand"]
-    paths:
-      - ".github/workflows/bootstrap.yml"
-      - ".bootstrap/**"
+  pull_request:
+    branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: spellwire-rebrand-materialize
+  group: spellwire-rebrand-materialize-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   materialize:
-    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,12 +39,16 @@ jobs:
           cargo test --workspace
           cargo build -p rune-native --release
 
-      - name: Commit materialized source to rebrand branch
+      - name: Pack materialized source
         run: |
           set -euo pipefail
+          rm -rf .git .bootstrap
           rm -f .github/workflows/bootstrap.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "chore: materialize verified runtime source"
-          git push origin HEAD:feat/spellwire-rebrand
+          tar -czf /tmp/materialized-source.tar.gz .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: materialized-source
+          path: /tmp/materialized-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
