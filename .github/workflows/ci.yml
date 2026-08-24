@@ -1,17 +1,63 @@
-name: CI staging guard
+name: CI
 
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - ".bootstrap/**"
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  staging:
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --all -- --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked
+      - run: cargo build --workspace --release --locked
+
+  msrv:
+    name: Rust 1.81
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Verified Rune source materialization is pending."
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.81.0
+      - run: cargo check --workspace --locked
+
+  typescript:
+    name: Bun / TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test:ts
+
+  quickstart:
+    name: Quick Start smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run compile:example
+      - run: cargo run -q -p rune-cli --locked -- inspect examples/stateful.rune.bin
+      - run: cargo run -q -p rune-cli --locked -- simulate examples/stateful.rune.bin key-down:Q key-up:Q key-down:Q key-up:Q key-down:Q key-up:Q

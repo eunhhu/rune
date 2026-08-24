@@ -3,6 +3,7 @@ members = [
   "crates/rune-core",
   "crates/rune-native",
   "crates/rune-bench",
+  "crates/rune-cli",
 ]
 resolver = "2"
 
