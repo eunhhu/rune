@@ -1,0 +1,134 @@
+name: Ship stateful realtime runtime to main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/ship_stateful_rt_v2.py"
+      - ".github/workflows/ship-stateful-runtime-v2.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rune-stateful-runtime-main
+  cancel-in-progress: false
+
+jobs:
+  materialize-and-ship:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Materialize the original verified source tree
+        shell: bash
+        run: |
+          if [[ -f .bootstrap/unpack.py ]]; then
+            python3 .bootstrap/unpack.py
+          fi
+
+      - name: Install stateful realtime TypeScript runtime
+        run: python3 tools/ship_stateful_rt_v2.py
+
+      - name: Apply post-generation correctness fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          vm = Path("crates/rune-core/src/rt_vm.rs")
+          text = vm.read_text(encoding="utf-8")
+          text = text.replace("RtInstruction::JumpIfFalse(17),", "RtInstruction::JumpIfFalse(18),")
+          vm.write_text(text, encoding="utf-8")
+
+          compiler = Path("packages/sdk/src/rt.ts")
+          text = compiler.read_text(encoding="utf-8")
+          text = text.replace(
+              "const diagnostics = file.parseDiagnostics;\n  if (diagnostics.length > 0) {\n    throw new RtCompileError(\n      `unable to parse realtime definition: ${ts.flattenDiagnosticMessageText(diagnostics[0].messageText, \\\"\\n\\\")}`,\n    );\n  }",
+              "const diagnostics = (file as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];\n  const diagnostic = diagnostics[0];\n  if (diagnostic) {\n    throw new RtCompileError(\n      `unable to parse realtime definition: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, \\\"\\n\\\")}`,\n    );\n  }",
+          )
+          old = '''      return table[expression.name.text as keyof typeof table];'''
+          new = '''      const value = (table as Readonly<Record<string, number>>)[expression.name.text];
+      if (value === undefined) {
+        throw new RtCompileError(`${propertyChain(expression)} is not a Rune constant`, expression);
+      }
+      return value;'''
+          text = text.replace(old, new)
+          compiler.write_text(text, encoding="utf-8")
+
+          bridge = Path("packages/sdk/src/rt-native.ts")
+          text = bridge.read_text(encoding="utf-8")
+          text = text.replace(
+              "return this.ensureNative().symbols.rune_rt_dispatch_failures();",
+              "return BigInt(this.ensureNative().symbols.rune_rt_dispatch_failures());",
+          )
+          bridge.write_text(text, encoding="utf-8")
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Format and validate Rust
+        run: |
+          cargo fmt --all
+          cargo test --workspace
+          cargo build -p rune-native --release
+
+      - name: Validate TypeScript compiler and SDK
+        run: |
+          bun install
+          bun run typecheck
+          bun run test:ts
+
+      - name: Remove one-shot shipping files
+        run: |
+          rm -f tools/ship_stateful_rt_v2.py
+          rm -f .github/workflows/ship-stateful-runtime-v2.yml
+          rmdir tools 2>/dev/null || true
+
+      - name: Commit directly to main
+        id: commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "feat: add stateful realtime TypeScript VM"
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  native-matrix:
+    needs: materialize-and-ship
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.materialize-and-ship.outputs.commit }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace
+      - run: cargo build -p rune-native --release
+
+  typescript:
+    needs: materialize-and-ship
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.materialize-and-ship.outputs.commit }}
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run typecheck
+      - run: bun run test:ts
