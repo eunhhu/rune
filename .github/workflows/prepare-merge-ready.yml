@@ -33,12 +33,26 @@ jobs:
           mkdir -p /tmp/rune-preserve /tmp/rune-generators
           cp README.md /tmp/rune-preserve/README.md
           cp -a docs /tmp/rune-preserve/docs
+          if [[ -d packaging ]]; then cp -a packaging /tmp/rune-preserve/packaging; fi
           cp -a tools/. /tmp/rune-generators/
 
       - name: Materialize the complete source tree
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path(".bootstrap/unpack.py")
+          text = path.read_text(encoding="utf-8")
+          previous = "c2e6adbf978923db004f49e069a5ca4c4d321275b0bcd705ffc91990b8227439"
+          current = "6c566c86ba2c32fef2987f2e52ed5939cb6fa0a54d13565eaedc2b88615735b3"
+          if previous in text:
+              text = text.replace(previous, current)
+          elif current not in text:
+              raise RuntimeError("unexpected bootstrap checksum declaration")
+          path.write_text(text, encoding="utf-8")
+          PY
           python3 .bootstrap/unpack.py
           mkdir -p tools
           cp -a /tmp/rune-generators/. tools/
@@ -46,6 +60,10 @@ jobs:
           rm -rf docs
           cp -a /tmp/rune-preserve/docs docs
           cp /tmp/rune-preserve/README.md README.md
+          if [[ -d /tmp/rune-preserve/packaging ]]; then
+            rm -rf packaging
+            cp -a /tmp/rune-preserve/packaging packaging
+          fi
 
       - name: Normalize workspace dependencies and scripts
         shell: python
@@ -116,6 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .bootstrap tools
+          rm -f docs/.materialization-pr
           find .github/workflows -maxdepth 1 -type f -delete
           cat > .github/workflows/ci.yml <<'YAML'
           name: CI
@@ -130,7 +149,7 @@ jobs:
 
           jobs:
             rust:
-              name: Rust (${{ matrix.os }})
+              name: Rust
               strategy:
                 fail-fast: false
                 matrix:
