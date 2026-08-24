@@ -26,15 +26,14 @@ jobs:
           ref: fix/materialize-runtime
           fetch-depth: 0
 
-      - name: Preserve the current handbook and source generators
+      - name: Preserve the current handbook
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/rune-preserve /tmp/rune-generators
+          mkdir -p /tmp/rune-preserve
           cp README.md /tmp/rune-preserve/README.md
           cp -a docs /tmp/rune-preserve/docs
           if [[ -d packaging ]]; then cp -a packaging /tmp/rune-preserve/packaging; fi
-          cp -a tools/. /tmp/rune-generators/
 
       - name: Materialize the complete source tree
         shell: bash
@@ -54,9 +53,6 @@ jobs:
           path.write_text(text, encoding="utf-8")
           PY
           python3 .bootstrap/unpack.py
-          mkdir -p tools
-          cp -a /tmp/rune-generators/. tools/
-          python3 tools/ship_stateful_rt_v9.py
           rm -rf docs
           cp -a /tmp/rune-preserve/docs docs
           cp /tmp/rune-preserve/README.md README.md
@@ -65,7 +61,7 @@ jobs:
             cp -a /tmp/rune-preserve/packaging packaging
           fi
 
-      - name: Normalize workspace dependencies and scripts
+      - name: Normalize workspace scripts
         shell: python
         run: |
           from __future__ import annotations
@@ -76,8 +72,8 @@ jobs:
           root = Path.cwd()
           package_path = root / "package.json"
           package = json.loads(package_path.read_text(encoding="utf-8"))
-          package.setdefault("scripts", {})
-          package["scripts"].update(
+          scripts = package.setdefault("scripts", {})
+          scripts.update(
               {
                   "build:native": "cargo build -p rune-native --release",
                   "test:rust": "cargo test --workspace",
@@ -96,13 +92,7 @@ jobs:
           dev_dependencies["typescript"] = typescript
           package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
 
-          sdk_path = root / "packages/sdk/package.json"
-          sdk = json.loads(sdk_path.read_text(encoding="utf-8"))
-          sdk.setdefault("dependencies", {})["typescript"] = typescript
-          sdk_path.write_text(json.dumps(sdk, indent=2) + "\n", encoding="utf-8")
-
-      - name: Install toolchains
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
@@ -186,7 +176,7 @@ jobs:
           cat > docs/runtime-verification.md <<EOF
           # Runtime verification
 
-          This source tree was materialized and committed only after the following checks passed:
+          This source tree was committed only after these checks passed:
 
           - \`cargo test --workspace\`
           - \`cargo clippy --workspace --all-targets -- -D warnings\`
