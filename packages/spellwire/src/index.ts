@@ -1,4 +1,6 @@
 export { Key, MouseButton, InputSource } from "./keys";
+export { Spellwire } from "./app";
+export type { SpellwireStartOptions } from "./app";
 export {
   clickMouse,
   getFallbackRealtimeRegistrations,
@@ -36,6 +38,8 @@ export {
   resolveOverlayExecutable,
 } from "./overlay";
 export type {
+  OverlayEllipse,
+  OverlayFont,
   NativeOverlayOptions,
   NativeOverlayReady,
   OverlayLine,
@@ -43,8 +47,30 @@ export type {
   OverlayNode,
   OverlayNodeId,
   OverlayRect,
+  OverlayShadow,
+  OverlayStroke,
   OverlayText,
 } from "./overlay";
+export { Overlay, OverlayView, ui } from "./overlay-ui";
+export type {
+  OverlayAlign,
+  OverlayBadgeProps,
+  OverlayBindingOptions,
+  OverlayChild,
+  OverlayDividerProps,
+  OverlayDotProps,
+  OverlayElement,
+  OverlayEllipseProps,
+  OverlayFrameProps,
+  OverlayInsets,
+  OverlayJustify,
+  OverlayLayoutProps,
+  OverlayLength,
+  OverlayMountOptions,
+  OverlayReadable,
+  OverlayStateSource,
+  OverlayTextProps,
+} from "./overlay-ui";
 export {
   NativeCapability,
   NativeHost,
@@ -62,6 +88,7 @@ export type {
   ProgramDescriptor,
   NativeRuntimeInfo,
   NativeStateManifestEntry,
+  NativeStateSnapshot,
   NativeWatchOptions,
 } from "./native";
 

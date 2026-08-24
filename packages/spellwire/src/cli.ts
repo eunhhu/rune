@@ -4,7 +4,7 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { compileSource } from "./compiler/compiler";
 import { encodeModule } from "./compiler/encode";
-import { NativeHost, NativePermission } from "./native";
+import { Spellwire } from "./app";
 
 const VERSION = "0.1.0";
 const DEFAULT_INPUT = "src/main.spellwire.ts";
@@ -127,63 +127,20 @@ async function runNative(args: string[], watchMode: boolean): Promise<void> {
   const input = positional[0] ?? DEFAULT_INPUT;
   const library = optionValue(args, "--library");
   const manifest = optionValue(args, "--manifest");
-  const host = await NativeHost.load(input, {
+  const app = await Spellwire.start({
+    input,
+    watch: watchMode,
     ...(library ? { nativeLibraryPath: library } : {}),
     ...(manifest ? { manifestPath: manifest } : {}),
+    onReload: () => console.log("reloaded"),
+    onError: (error) => console.error(`reload failed: ${error.message}`),
   });
-  let watcher: ReturnType<NativeHost["watch"]> | undefined;
-  try {
-    preparePermissions(host);
-    host.start();
-    if (watchMode) {
-      watcher = host.watch({
-        onReload: () => console.log("reloaded"),
-        onError: (error) => console.error(`reload failed: ${error.message}`),
-      });
-    }
-    console.log(
-      watchMode
-        ? `watching ${resolve(input)} (hot reload enabled; press Ctrl+C to stop)`
-        : `running ${resolve(input)} (press Ctrl+C to stop)`,
-    );
-    await waitForSignal();
-  } finally {
-    watcher?.close();
-    host.close();
-  }
-}
-
-function preparePermissions(host: NativeHost): void {
-  const required = NativePermission.Observe | NativePermission.Inject;
-  let permissions = host.permissionStatus();
-  if ((permissions & required) === required) return;
-
-  console.log("Spellwire needs global input permissions; requesting them now...");
-  permissions = host.requestPermissions();
-  if ((permissions & required) === required) return;
-
-  const missing = [
-    (permissions & NativePermission.Observe) === 0 ? "observation" : undefined,
-    (permissions & NativePermission.Inject) === 0 ? "injection" : undefined,
-  ].filter((value): value is string => value !== undefined);
-  throw new Error(permissionHelp(missing));
-}
-
-function permissionHelp(missing: readonly string[]): string {
-  const prefix = `missing global input permission: ${missing.join(" and ")}.`;
-  if (process.platform === "darwin") {
-    return (
-      `${prefix} Grant Input Monitoring and Accessibility to the app running Bun in ` +
-      "System Settings > Privacy & Security, then run the command again."
-    );
-  }
-  if (process.platform === "linux") {
-    return (
-      `${prefix} Grant read access to /dev/input/event* and write access to /dev/uinput; ` +
-      "see the Linux section of the Spellwire Platform Verification Guide."
-    );
-  }
-  return `${prefix} Check the current desktop session and process integrity level.`;
+  console.log(
+    watchMode
+      ? `watching ${resolve(input)} (hot reload enabled; press Ctrl+C to stop)`
+      : `running ${resolve(input)} (press Ctrl+C to stop)`,
+  );
+  await app.untilSignal();
 }
 
 function assertKnownOptions(args: readonly string[], known: ReadonlySet<string>): void {
@@ -216,18 +173,6 @@ function optionValue(args: string[], option: string): string | undefined {
   const value = args[index + 1];
   if (!value || value.startsWith("--")) throw new Error(`${option} requires a value`);
   return value;
-}
-
-function waitForSignal(): Promise<void> {
-  return new Promise((resolveSignal) => {
-    const finish = (): void => {
-      process.off("SIGINT", finish);
-      process.off("SIGTERM", finish);
-      resolveSignal();
-    };
-    process.once("SIGINT", finish);
-    process.once("SIGTERM", finish);
-  });
 }
 
 if (import.meta.main) {

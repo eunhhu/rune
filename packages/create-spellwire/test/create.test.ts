@@ -13,12 +13,16 @@ test("creates a buildable Spellwire project", async () => {
     const packageJson = await Bun.file(join(target, "package.json")).json();
     expect(packageJson.dependencies.spellwire).toBe("latest");
     expect(Object.keys(packageJson.scripts)).toEqual(["start", "watch", "build"]);
-    expect(packageJson.scripts.start).toBe("spellwire run");
-    expect(packageJson.scripts.watch).toBe("spellwire watch");
+    expect(packageJson.scripts.start).toBe("bun src/app.ts");
+    expect(packageJson.scripts.watch).toBe("bun src/app.ts --watch");
     expect(packageJson.scripts.build).toBe(
       "spellwire compile src/main.spellwire.ts dist/main.spellwire.bin",
     );
     expect(await Bun.file(join(target, "src/main.spellwire.ts")).exists()).toBe(true);
+    const app = await Bun.file(join(target, "src/app.ts")).text();
+    expect(app).toContain("Spellwire.start");
+    expect(app).toContain("ui.column");
+    expect(app).toContain("overlay: (state)");
     const readme = await Bun.file(join(target, "README.md")).text();
     expect(readme).toContain("bun run start");
     expect(readme).toContain("bun run watch");

@@ -14,12 +14,14 @@
     "test:rust": "cargo test --workspace --locked",
     "test:ts": "bun test packages/spellwire/test packages/create-spellwire/test",
     "test:platform-loopback": "bun scripts/platform-loopback.ts",
+    "test:overlay-live": "bun scripts/overlay-live-smoke.ts",
     "check": "bun run typecheck && bun run test:ts && cargo fmt --all -- --check && cargo test --workspace --locked && cargo clippy --workspace --all-targets --locked -- -D warnings",
     "compile:example": "bun packages/spellwire/src/cli.ts compile examples/stateful.spellwire.ts",
     "inspect:example": "cargo run -q -p spellwire-cli --locked -- inspect examples/stateful.spellwire.bin",
     "simulate:example": "bun run compile:example && cargo run -q -p spellwire-cli --locked -- simulate examples/stateful.spellwire.bin key-down:Q key-up:Q key-down:Q key-up:Q key-down:Q key-up:Q",
     "bench": "cargo run -p spellwire-bench --release --locked --",
     "bench:platform": "cargo run -p spellwire-native --bin platform-bench --release --locked --",
+    "bench:overlay": "bun scripts/overlay-bench.ts",
     "pack:dry-run": "npm pack --dry-run --workspace spellwire && npm pack --dry-run --workspace create-spellwire"
   },
   "devDependencies": {
