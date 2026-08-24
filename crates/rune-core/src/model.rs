@@ -1,6 +1,6 @@
 use core::fmt;
 
-/// Rune key identifiers follow the USB HID keyboard usage page.
+/// Rune key identifiers use USB HID keyboard usage IDs, not platform virtual-key codes.
 pub mod key {
     pub const A: u16 = 0x04;
     pub const B: u16 = 0x05;
@@ -158,6 +158,18 @@ pub enum InputSource {
     Synthetic = 1,
 }
 
+impl TryFrom<u8> for InputSource {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Physical),
+            1 => Ok(Self::Synthetic),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum SourceFilter {
@@ -221,41 +233,12 @@ impl TryFrom<u8> for MouseButton {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action {
-    KeyDown(u16),
-    KeyUp(u16),
-    MouseDown(MouseButton),
-    MouseUp(MouseButton),
-    MouseMove { dx: i32, dy: i32 },
-    MouseWheel { x: i32, y: i32 },
-    DelayUs(u32),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputEvent {
     Empty,
     Key { code: u16, down: bool },
     MouseButton { button: MouseButton, down: bool },
     MouseMove { dx: i32, dy: i32 },
     MouseWheel { x: i32, y: i32 },
-}
-
-impl OutputEvent {
-    #[must_use]
-    pub const fn from_action(action: Action) -> Option<Self> {
-        match action {
-            Action::KeyDown(code) => Some(Self::Key { code, down: true }),
-            Action::KeyUp(code) => Some(Self::Key { code, down: false }),
-            Action::MouseDown(button) => Some(Self::MouseButton { button, down: true }),
-            Action::MouseUp(button) => Some(Self::MouseButton {
-                button,
-                down: false,
-            }),
-            Action::MouseMove { dx, dy } => Some(Self::MouseMove { dx, dy }),
-            Action::MouseWheel { x, y } => Some(Self::MouseWheel { x, y }),
-            Action::DelayUs(_) => None,
-        }
-    }
 }
 
 impl fmt::Display for InputDevice {

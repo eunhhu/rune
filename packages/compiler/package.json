@@ -1,0 +1,15 @@
+{
+  "name": "@rune/compiler",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "rune-compile": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@rune/sdk": "workspace:*",
+    "typescript": "^5.8.3"
+  }
+}

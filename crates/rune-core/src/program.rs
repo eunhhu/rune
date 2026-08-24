@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{Edge, InputDevice, InputEvent, InputSource, SourceFilter, Trigger};
+use crate::{Edge, InputDevice, InputEvent, InputSource, Instruction, SourceFilter, Trigger};
 
 pub const MAX_KEY_CODE: usize = 256;
 pub const MAX_MOUSE_BUTTON: usize = 8;
@@ -8,37 +8,68 @@ const BASE_TRIGGER_SLOTS: usize = MAX_KEY_CODE * 2 + MAX_MOUSE_BUTTON * 2;
 const SOURCE_TABLES: usize = 3;
 const TRIGGER_SLOTS: usize = BASE_TRIGGER_SLOTS * SOURCE_TABLES;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Handler {
+    pub trigger: Trigger,
+    pub entry: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Program {
-    pub name: Box<str>,
-    pub trigger: Trigger,
-    pub actions: Box<[crate::Action]>,
+    pub initial_state: Box<[i64]>,
+    pub handlers: Box<[Handler]>,
+    pub code: Box<[Instruction]>,
+    pub local_count: u16,
+    pub stack_limit: u16,
+    pub instruction_budget: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProgramSetError {
-    TooManyPrograms(usize),
-    InvalidTrigger { name: Box<str>, trigger: Trigger },
-    TooManyProgramsForTrigger { trigger: Trigger },
+pub enum ProgramError {
+    NoHandlers,
+    NoCode,
+    TooManyHandlers(usize),
+    InvalidTrigger(Trigger),
+    InvalidEntry { handler: usize, entry: u32 },
+    InvalidJump { instruction: usize, target: u32 },
+    InvalidStateSlot { instruction: usize, slot: u16 },
+    InvalidLocalSlot { instruction: usize, slot: u16 },
+    StackLimitTooLarge(u16),
+    LocalCountTooLarge(u16),
+    ZeroInstructionBudget,
+    TooManyHandlersForTrigger(Trigger),
 }
 
-impl fmt::Display for ProgramSetError {
+impl fmt::Display for ProgramError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::TooManyPrograms(count) => {
-                write!(f, "program count {count} exceeds the u16 runtime limit")
+            Self::NoHandlers => f.write_str("program has no input handlers"),
+            Self::NoCode => f.write_str("program has no bytecode"),
+            Self::TooManyHandlers(count) => write!(f, "handler count {count} exceeds u16"),
+            Self::InvalidTrigger(trigger) => write!(f, "invalid trigger {trigger:?}"),
+            Self::InvalidEntry { handler, entry } => {
+                write!(f, "handler {handler} points to invalid entry {entry}")
             }
-            Self::InvalidTrigger { name, trigger } => {
-                write!(f, "program {name:?} has an invalid trigger: {trigger:?}")
+            Self::InvalidJump { instruction, target } => {
+                write!(f, "instruction {instruction} jumps to invalid target {target}")
             }
-            Self::TooManyProgramsForTrigger { trigger } => {
-                write!(f, "too many programs share trigger {trigger:?}")
+            Self::InvalidStateSlot { instruction, slot } => {
+                write!(f, "instruction {instruction} uses invalid state slot {slot}")
+            }
+            Self::InvalidLocalSlot { instruction, slot } => {
+                write!(f, "instruction {instruction} uses invalid local slot {slot}")
+            }
+            Self::StackLimitTooLarge(limit) => write!(f, "stack limit {limit} exceeds runtime cap"),
+            Self::LocalCountTooLarge(count) => write!(f, "local count {count} exceeds runtime cap"),
+            Self::ZeroInstructionBudget => f.write_str("instruction budget must be non-zero"),
+            Self::TooManyHandlersForTrigger(trigger) => {
+                write!(f, "too many handlers share trigger {trigger:?}")
             }
         }
     }
 }
 
-impl std::error::Error for ProgramSetError {}
+impl std::error::Error for ProgramError {}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Bucket {
@@ -47,121 +78,85 @@ struct Bucket {
 }
 
 #[derive(Debug, Clone)]
-pub struct ProgramSet {
-    programs: Box<[Program]>,
+pub struct HandlerTable {
     buckets: Box<[Bucket]>,
-    program_ids: Box<[u16]>,
+    handler_ids: Box<[u16]>,
 }
 
-impl ProgramSet {
-    pub fn new(programs: Vec<Program>) -> Result<Self, ProgramSetError> {
-        if programs.len() > usize::from(u16::MAX) {
-            return Err(ProgramSetError::TooManyPrograms(programs.len()));
+impl HandlerTable {
+    pub fn build(handlers: &[Handler]) -> Result<Self, ProgramError> {
+        if handlers.is_empty() {
+            return Err(ProgramError::NoHandlers);
+        }
+        if handlers.len() > usize::from(u16::MAX) {
+            return Err(ProgramError::TooManyHandlers(handlers.len()));
         }
 
         let mut lists: Vec<Vec<u16>> = (0..TRIGGER_SLOTS).map(|_| Vec::new()).collect();
-        for (program_id, program) in programs.iter().enumerate() {
-            let Some(slot) = trigger_slot(program.trigger) else {
-                return Err(ProgramSetError::InvalidTrigger {
-                    name: program.name.clone(),
-                    trigger: program.trigger,
-                });
+        for (handler_id, handler) in handlers.iter().enumerate() {
+            let Some(slot) = trigger_slot(handler.trigger) else {
+                return Err(ProgramError::InvalidTrigger(handler.trigger));
             };
             if lists[slot].len() == usize::from(u16::MAX) {
-                return Err(ProgramSetError::TooManyProgramsForTrigger {
-                    trigger: program.trigger,
-                });
+                return Err(ProgramError::TooManyHandlersForTrigger(handler.trigger));
             }
-            lists[slot].push(program_id as u16);
+            lists[slot].push(handler_id as u16);
         }
 
-        let total_ids = lists.iter().map(Vec::len).sum();
+        let total = lists.iter().map(Vec::len).sum();
         let mut buckets = vec![Bucket::default(); TRIGGER_SLOTS];
-        let mut program_ids = Vec::with_capacity(total_ids);
+        let mut handler_ids = Vec::with_capacity(total);
         for (slot, ids) in lists.into_iter().enumerate() {
-            let start = program_ids.len();
-            program_ids.extend(ids);
-            buckets[slot] = Bucket {
-                start: start as u32,
-                len: (program_ids.len() - start) as u16,
-            };
+            let start = handler_ids.len();
+            handler_ids.extend(ids);
+            buckets[slot] = Bucket { start: start as u32, len: (handler_ids.len() - start) as u16 };
         }
 
         Ok(Self {
-            programs: programs.into_boxed_slice(),
             buckets: buckets.into_boxed_slice(),
-            program_ids: program_ids.into_boxed_slice(),
+            handler_ids: handler_ids.into_boxed_slice(),
         })
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.programs.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.programs.is_empty()
-    }
-
-    #[must_use]
-    pub fn programs(&self) -> &[Program] {
-        &self.programs
-    }
-
-    #[must_use]
-    pub fn matching(&self, event: InputEvent) -> MatchingPrograms<'_> {
+    pub fn matching(&self, event: InputEvent) -> MatchingHandlers<'_> {
         let Some(base) = base_slot(event.device, event.code, event.edge) else {
-            return MatchingPrograms::empty(&self.programs);
+            return MatchingHandlers::empty();
         };
-
-        let exact_source = match event.source {
+        let exact = match event.source {
             InputSource::Physical => SourceFilter::Physical,
             InputSource::Synthetic => SourceFilter::Synthetic,
         };
-        let exact = self.ids_for_slot(source_slot(base, exact_source));
-        let any = self.ids_for_slot(source_slot(base, SourceFilter::Any));
-
-        MatchingPrograms {
-            programs: &self.programs,
-            first: exact.iter(),
-            second: any.iter(),
+        MatchingHandlers {
+            first: self.ids_for_slot(source_slot(base, exact)).iter(),
+            second: self.ids_for_slot(source_slot(base, SourceFilter::Any)).iter(),
         }
     }
 
     fn ids_for_slot(&self, slot: usize) -> &[u16] {
         let bucket = self.buckets[slot];
         let start = bucket.start as usize;
-        let end = start + usize::from(bucket.len);
-        &self.program_ids[start..end]
+        &self.handler_ids[start..start + usize::from(bucket.len)]
     }
 }
 
-pub struct MatchingPrograms<'a> {
-    programs: &'a [Program],
+pub struct MatchingHandlers<'a> {
     first: core::slice::Iter<'a, u16>,
     second: core::slice::Iter<'a, u16>,
 }
 
-impl<'a> MatchingPrograms<'a> {
-    fn empty(programs: &'a [Program]) -> Self {
-        let empty: &'a [u16] = &[];
-        Self {
-            programs,
-            first: empty.iter(),
-            second: empty.iter(),
-        }
+impl MatchingHandlers<'_> {
+    fn empty() -> Self {
+        let empty: &[u16] = &[];
+        Self { first: empty.iter(), second: empty.iter() }
     }
 }
 
-impl<'a> Iterator for MatchingPrograms<'a> {
-    type Item = (u16, &'a Program);
+impl Iterator for MatchingHandlers<'_> {
+    type Item = u16;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.first
-            .next()
-            .or_else(|| self.second.next())
-            .map(|id| (*id, &self.programs[usize::from(*id)]))
+        self.first.next().or_else(|| self.second.next()).copied()
     }
 }
 
@@ -184,57 +179,5 @@ fn base_slot(device: InputDevice, code: u16, edge: Edge) -> Option<usize> {
             Some(MAX_KEY_CODE * 2 + edge_offset * MAX_MOUSE_BUTTON + usize::from(code))
         }
         _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{Action, Edge, InputDevice, InputEvent, InputSource, SourceFilter, Trigger};
-
-    use super::{Program, ProgramSet};
-
-    fn program(name: &str, source: SourceFilter) -> Program {
-        Program {
-            name: name.into(),
-            trigger: Trigger {
-                device: InputDevice::Keyboard,
-                code: 0x14,
-                edge: Edge::Down,
-                source,
-            },
-            actions: vec![Action::KeyDown(0x08)].into_boxed_slice(),
-        }
-    }
-
-    #[test]
-    fn matches_exact_and_any_without_allocating() {
-        let set = ProgramSet::new(vec![
-            program("physical", SourceFilter::Physical),
-            program("any", SourceFilter::Any),
-            program("synthetic", SourceFilter::Synthetic),
-        ])
-        .unwrap();
-
-        let physical: Vec<_> = set
-            .matching(InputEvent {
-                device: InputDevice::Keyboard,
-                code: 0x14,
-                edge: Edge::Down,
-                source: InputSource::Physical,
-            })
-            .map(|(_, p)| p.name.as_ref())
-            .collect();
-        assert_eq!(physical, ["physical", "any"]);
-
-        let synthetic: Vec<_> = set
-            .matching(InputEvent {
-                device: InputDevice::Keyboard,
-                code: 0x14,
-                edge: Edge::Down,
-                source: InputSource::Synthetic,
-            })
-            .map(|(_, p)| p.name.as_ref())
-            .collect();
-        assert_eq!(synthetic, ["synthetic", "any"]);
     }
 }

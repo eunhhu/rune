@@ -1,14 +1,20 @@
 [package]
-name = "rune-core"
+name = "rune-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+publish = false
+default-run = "rune-sim"
 
-[lib]
-path = "src/lib.rs"
+[[bin]]
+name = "rune-sim"
+path = "src/main.rs"
+
+[dependencies]
+rune-core = { path = "../rune-core" }
 
 [lints]
 workspace = true

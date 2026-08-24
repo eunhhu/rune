@@ -1,103 +1,131 @@
 # Troubleshooting
 
-## `@rune/sdk` cannot be resolved
+## `@rune/sdk` or `@rune/compiler` cannot be resolved
 
-From a repository checkout, run:
-
-```bash
-bun install
-```
-
-If the repository is in a development transition state before the stateful runtime source has been materialized, wait for the `Validate stateful runtime against existing SDK API` workflow on `main` to finish, then pull the latest `main`.
-
-## Native library cannot be found
-
-Build it first:
+Install the workspace with Bun:
 
 ```bash
-cargo build -p rune-native --release
+bun install --frozen-lockfile
 ```
 
-The SDK checks common local build locations. To force a specific artifact:
+Run commands from the repository root so Bun can resolve the workspace packages.
+
+## TypeScript build errors mention missing declaration outputs
+
+The SDK and compiler use TypeScript project references. Use build mode rather than checking each project independently:
 
 ```bash
-RUNE_NATIVE_PATH=/absolute/path/to/librune_native.so bun macro.ts
+bun run typecheck
 ```
 
-Use the platform equivalent `.dll` or `.dylib` as appropriate.
-
-## Macro starts but input is not observed
-
-### Windows
-
-Check whether the target process runs at a higher integrity level. Windows UIPI can prevent a normal process from injecting into an elevated one.
-
-### macOS
-
-Verify both permissions for the terminal/application running Rune:
-
-- Input Monitoring
-- Accessibility
-
-After changing permissions, fully quit and restart the process.
-
-### Linux
-
-Check device access:
+To remove generated declaration/build metadata:
 
 ```bash
-ls -l /dev/input/event* /dev/uinput
+bun run clean:ts
 ```
 
-Install the sample udev rule if needed:
+## Compilation says no realtime handlers were found
 
-```bash
-sudo cp packaging/linux/99-rune-input.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-Readable keyboard event devices expose global keyboard input, so review the rule before installing it on a multi-user machine.
-
-## Synthetic event triggers itself repeatedly
-
-Use physical-source filtering for handlers that should react only to hardware input. Rune distinguishes physical and synthetic input where the platform backend exposes enough information to do so.
-
-## Very short delays overshoot
-
-Desktop operating systems are not hard realtime schedulers. Rune uses absolute deadlines and may spin for the final short part of a delay, but USB polling, thread scheduling, and the target application's own input polling remain external sources of latency.
-
-Tune the spin tail conservatively:
+Registrations must be top-level calls with an inline callback:
 
 ```ts
-rune.configure({ spinThresholdUs: 100 });
+rt.onKeyDown(Key.Q, () => {
+  tapKey(Key.E);
+});
 ```
 
-Higher values can reduce scheduler overshoot but consume more CPU while waiting.
+A registration hidden inside another runtime function is not discovered by the current compiler.
 
-## `rt.load()` rejects valid TypeScript
+## A handler rejects ordinary TypeScript
 
-The realtime plane is intentionally a subset of TypeScript. Move unsupported code outside `rt.load()` and communicate through persistent state/configuration instead.
+The module may contain unrestricted control-plane TypeScript, but realtime handlers can reference only values the compiler can lower to bounded integer bytecode.
 
-See [TypeScript Runtime](typescript-runtime.md) for the supported model.
+Common causes:
 
-## How to report a performance problem
+- capturing a string/object/array;
+- calling an arbitrary Bun/npm function;
+- a non-constant key or handler option;
+- a helper that returns a value;
+- recursion or a runtime-created closure;
+- destructuring or dynamic property access.
+
+See [TypeScript Runtime](typescript-runtime.md).
+
+## `sleepUs()` is inaccurate
+
+The current runtime uses an absolute deadline and a spin tail, but a general-purpose desktop OS is not a hard realtime scheduler. The simulator also executes delays synchronously, so long waits make the command appear paused.
+
+Microsecond input is a deadline request, not a physical end-to-end guarantee.
+
+## `bun macro.rune.ts` produces no global keyboard events
+
+That is expected in the current branch. Executing the source directly registers JavaScript fallback handlers; it does not install a Windows/macOS/Linux observer.
+
+Use:
+
+```bash
+bun packages/compiler/src/cli.ts macro.rune.ts
+cargo run -q -p rune-cli -- simulate macro.rune.bin key-down:Q key-up:Q
+```
+
+Direct OS backends are listed as planned in [Platform Status](platforms.md).
+
+## Native library output does nothing
+
+`rune-native` discards output if no host callback is installed. A host must call `rune_engine_set_output_callback` and translate received batches to its platform injection API.
+
+The ABI does not currently provide `start()` or `stop()` functions for global observation. See [Native C ABI](native-abi.md).
+
+## Simulator rejects an event
+
+Use one of these forms:
+
+```text
+key-down:Q
+key-up:LeftShift
+mouse-down:left
+mouse-up:forward
+key-down:0x14:synthetic
+```
+
+The optional source is `physical` or `synthetic`. Handler filters may use `InputSource.Any`, but an actual event itself must have a concrete source.
+
+## Generated files keep appearing
+
+Compiler outputs and TypeScript build products are ignored by Git:
+
+```text
+*.rune.bin
+*.rune.bin.json
+packages/*/dist/
+*.tsbuildinfo
+```
+
+Remove TypeScript build outputs with `bun run clean:ts`.
+
+## Rust tests pass but Clippy prints warnings
+
+The workspace enables `clippy::pedantic` as warnings. During the MVP, Clippy runs in CI but pedantic findings are advisory rather than merge-blocking. Build/test failures remain blockers.
+
+## Verify everything locally
+
+```bash
+bun run check
+cargo clippy --workspace --all-targets --locked
+bun run compile:example
+bun run inspect:example
+bun run simulate:example
+```
+
+## Reporting a compiler/VM issue
 
 Include:
 
-- OS and version
-- CPU
-- keyboard/mouse polling rate if known
-- Rune commit SHA
-- backend in use
-- p50/p95/p99 rather than only an average
-- whether the overlay is enabled
-- a minimal macro that reproduces the issue
+- OS and CPU;
+- Bun and Rust versions;
+- commit SHA;
+- minimal `.rune.ts` source;
+- compiler diagnostic or simulator output;
+- generated manifest when state mapping matters.
 
-For core measurements:
-
-```bash
-bun run bench
-```
-
-Do not compare Rune's internal dispatch benchmark directly with physical-switch-to-game latency; they measure different portions of the path.
+Latency reports are premature for platform input until a direct backend exists. Core benchmark reports should identify that they measure VM dispatch only.

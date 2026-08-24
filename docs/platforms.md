@@ -1,64 +1,60 @@
-# Platform backends
+# Platform Status
 
-All public key codes are USB HID keyboard usages. Platform translation is isolated in the backend and is done without a map allocation in the input path.
+Rune's compiler, core VM, simulator, and C ABI build on Windows, macOS, and Linux. Direct system-wide input backends are not present in the current branch.
 
-## Windows
+## Current matrix
 
-The input thread owns a message-only window and registers keyboard and mouse Raw Input devices with `RIDEV_INPUTSINK`. `WM_INPUT` packets are translated to Rune events and dispatched directly from that thread.
+| Feature | Windows | macOS | Linux |
+| --- | --- | --- | --- |
+| TypeScript compiler | Yes | Yes | Yes |
+| Native VM/core | Yes | Yes | Yes |
+| `rune-native` C ABI | Yes | Yes | Yes |
+| `rune-sim` | Yes | Yes | Yes |
+| Global input observation | No | No | No |
+| Native input injection | No | No | No |
+| Native overlay renderer | No | No | No |
 
-Output actions are translated to scan-code `INPUT` records and submitted in one `SendInput` call per zero-delay batch. Navigation, right-side modifiers, numpad enter, and numpad divide use extended-key flags.
+`rune_capabilities()` currently returns only the `HostCallbackInjection` bit on every target.
 
-Current constraints:
+## Permissions for the current Quick Start
 
-- one active Windows Rune runtime per process
-- Pause/Break and a few uncommon HID usages are not mapped yet
-- physical-device identity is not surfaced in the TypeScript API yet
+The compiler and simulator do not observe or inject real input, so they require no special input permissions:
 
-## macOS
+- no Windows elevation;
+- no macOS Input Monitoring or Accessibility permission;
+- no Linux evdev/uinput access.
 
-The backend installs a listen-only HID event tap on a dedicated run loop. Keyboard, modifier `flagsChanged`, and mouse-button events are translated to USB HID usages. Autorepeat key-down events are ignored so a physical hold does not retrigger a down rule unless that behavior is added explicitly later.
+The included Linux udev rule is a future-backend packaging artifact and is not needed to compile or simulate a program.
 
-Output uses tagged CoreGraphics events. The event tap ignores Rune's tag to prevent recursion. Input Monitoring and Accessibility permissions are required.
+## Planned direct backends
 
-Current constraints:
+The intended low-overhead direction remains:
 
-- CoreGraphics posts the members of a zero-delay batch individually
-- modifier state is reconstructed from `flagsChanged`; starting Rune while a modifier is already held can make the first transition ambiguous
-- IOHIDManager is a possible later observer for device-level modes, but the MVP uses an event tap for a smaller compatibility surface
+| Platform | Observation | Injection |
+| --- | --- | --- |
+| Windows | Raw Input or a carefully measured low-level hook | `SendInput` |
+| macOS | `CGEventTap` initially; IOHID mode only if justified | tagged `CGEventPost` |
+| Linux | evdev | uinput |
 
-## Linux
+These APIs are design targets, not implemented claims.
 
-Rune opens readable `/dev/input/event*` descriptors before creating its own virtual device, then observes `EV_KEY` records with `poll`. Output is a uinput keyboard/mouse device. A zero-delay batch is written as native events followed by one `SYN_REPORT`.
+## Backend requirements
 
-This path is below X11 and Wayland, so the input engine itself does not depend on a compositor protocol. It does require permission to read input devices and create a uinput device. Those permissions are security-sensitive: access to all keyboard events is equivalent to keylogging capability.
+A direct backend should not be marked complete until it has:
 
-For a single-user desktop, the included example rule uses seat-based `uaccess`:
+- physical/synthetic recursion handling;
+- complete key translation tests for its supported map;
+- clear permission/setup diagnostics;
+- zero allocation in the input-to-dispatch path after startup;
+- output batching where the OS supports it;
+- clean start/stop and ownership semantics;
+- p50/p95/p99/p99.9 submission-latency measurements;
+- compile and smoke coverage on the target OS.
 
-```bash
-sudo cp packaging/linux/99-rune-input.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-sudo modprobe uinput
-```
+## Linux security note
 
-For multi-user or headless machines, create a dedicated group and use narrower administrator-managed rules instead of granting broad device access.
+Future evdev access exposes global keyboard input and is equivalent to keylogging capability. A shipped udev rule must be narrowly documented and appropriate for the deployment model. Do not install `packaging/linux/99-rune-input.rules` merely to use the current simulator.
 
-Current constraints:
+## Wayland and overlay
 
-- devices connected after Rune starts are not hot-added yet
-- the MVP opens every readable event device and filters to keyboard/button events in userspace
-- another pre-existing virtual device can still be observed; per-device include/exclude filters are planned
-
-## Capability API
-
-The native library returns bit flags for features compiled into the current target. The initial values are:
-
-```ts
-Capability.ObserveKeyboard
-Capability.ObserveMouseButton
-Capability.InjectKeyboard
-Capability.InjectMouse
-Capability.OverlayScene
-```
-
-`OverlayScene` remains unset until a native renderer is actually present.
+An evdev/uinput input backend can operate below X11/Wayland, but an always-on-top transparent overlay remains compositor-dependent. Wayland layer-shell is not universal, especially across GNOME/KDE/wlroots environments. Overlay support must therefore be reported through capabilities rather than a single unconditional “Linux supported” flag.

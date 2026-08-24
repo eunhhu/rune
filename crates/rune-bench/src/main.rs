@@ -1,8 +1,8 @@
 use std::{convert::Infallible, hint::black_box, time::Instant};
 
 use rune_core::{
-    key, Action, Edge, Engine, ExecutionConfig, ExecutionScratch, Injector, InputDevice,
-    InputEvent, InputSource, OutputEvent, Program, ProgramSet, SourceFilter, Trigger,
+    key, Edge, Handler, Injector, InputDevice, InputEvent, InputSource, Instruction, Opcode,
+    OutputEvent, Program, Runtime, RuntimeConfig, SourceFilter, Trigger, VmScratch,
 };
 
 const DEFAULT_SAMPLES: usize = 1_000_000;
@@ -27,18 +27,33 @@ fn main() {
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_SAMPLES);
 
-    let programs = ProgramSet::new(vec![Program {
-        name: "dispatch-benchmark".into(),
-        trigger: Trigger {
-            device: InputDevice::Keyboard,
-            code: key::Q,
-            edge: Edge::Down,
-            source: SourceFilter::Physical,
-        },
-        actions: vec![Action::KeyDown(key::E), Action::KeyUp(key::E)].into_boxed_slice(),
-    }])
-    .expect("benchmark program should compile");
-    let engine = Engine::new(programs, ExecutionConfig::default());
+    let program = Program {
+        initial_state: vec![0].into_boxed_slice(),
+        handlers: vec![Handler {
+            trigger: Trigger {
+                device: InputDevice::Keyboard,
+                code: key::Q,
+                edge: Edge::Down,
+                source: SourceFilter::Physical,
+            },
+            entry: 0,
+        }]
+        .into_boxed_slice(),
+        code: vec![
+            Instruction::new(Opcode::LoadState).with_a(0),
+            Instruction::new(Opcode::PushConst).with_immediate(1),
+            Instruction::new(Opcode::Add),
+            Instruction::new(Opcode::StoreState).with_a(0),
+            Instruction::new(Opcode::KeyDown).with_a(key::E),
+            Instruction::new(Opcode::KeyUp).with_a(key::E),
+            Instruction::new(Opcode::Halt),
+        ]
+        .into_boxed_slice(),
+        local_count: 0,
+        stack_limit: 16,
+        instruction_budget: 1_000,
+    };
+    let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
     let event = InputEvent {
         device: InputDevice::Keyboard,
         code: key::Q,
@@ -46,29 +61,21 @@ fn main() {
         source: InputSource::Physical,
     };
     let mut injector = NullInjector;
-    let mut scratch = ExecutionScratch::new();
+    let mut scratch = VmScratch::new();
 
     for _ in 0..WARMUP {
-        black_box(
-            engine
-                .dispatch(event, &mut injector, &mut scratch)
-                .expect("null injection cannot fail"),
-        );
+        black_box(runtime.dispatch(event, &mut injector, &mut scratch).unwrap());
     }
 
     let mut timings = Vec::with_capacity(samples);
     for _ in 0..samples {
         let start = Instant::now();
-        black_box(
-            engine
-                .dispatch(event, &mut injector, &mut scratch)
-                .expect("null injection cannot fail"),
-        );
+        black_box(runtime.dispatch(event, &mut injector, &mut scratch).unwrap());
         timings.push(start.elapsed().as_nanos() as u64);
     }
     timings.sort_unstable();
 
-    println!("Rune core dispatch benchmark ({samples} samples)");
+    println!("Rune VM dispatch benchmark ({samples} samples)");
     println!("p50  {:>8} ns", percentile(&timings, 50.0));
     println!("p95  {:>8} ns", percentile(&timings, 95.0));
     println!("p99  {:>8} ns", percentile(&timings, 99.0));
@@ -76,7 +83,7 @@ fn main() {
     println!("max  {:>8} ns", timings.last().copied().unwrap_or(0));
     println!();
     println!(
-        "This measures trigger lookup + VM execution + a null injector. It does not measure HID, OS injection, or target-application polling."
+        "Scope: trigger lookup + persistent-state VM + null injection. HID, OS injection and target polling are excluded."
     );
 }
 

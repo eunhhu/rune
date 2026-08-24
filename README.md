@@ -1,145 +1,166 @@
 # Rune
 
-Rune is a native realtime input automation runtime with a TypeScript scripting SDK.
+Rune is an ahead-of-time TypeScript macro compiler and a bounded native Rust VM. The repository currently lives at `eunhhu/spellwire`; package, crate, wire-format, and ABI names in this branch still use the `rune` prefix.
 
-TypeScript is the authoring language, but latency-sensitive handlers do **not** run as JavaScript callbacks on every input event. Rune supports both a simple macro builder and a stateful realtime TypeScript subset compiled into a native Rust VM.
+The central idea is that TypeScript remains the authoring language while latency-sensitive state, conditions, loops, helper functions, and output actions execute as native bytecode rather than as a Bun callback for every input event.
 
-> Early MVP. Input runtime and stateful RT execution are the current focus; the native overlay renderer is still under construction.
+> **Current milestone:** the compiler, wire format, native VM, C ABI, deterministic simulator, and TypeScript fallback tools work. System-wide Windows/macOS/Linux observation and injection are **not implemented in this branch yet**, so the Quick Start exercises the real native VM with simulated input events instead of installing a global hook.
+
+## What works today
+
+| Capability | Status |
+| --- | --- |
+| TypeScript AOT compiler | Implemented |
+| Persistent integer/boolean state | Implemented |
+| `if`, loops, assignments, and helper functions | Implemented |
+| Native Rust VM and versioned binary format | Implemented |
+| Physical/synthetic/any trigger filters | Implemented |
+| Native C ABI with host output callback | Implemented |
+| Deterministic native VM simulator | Implemented |
+| JavaScript fallback/debug lane | Implemented |
+| Retained overlay scene model | Implemented |
+| Global OS input observation/injection | Planned |
+| Native transparent overlay renderer | Planned |
+| Published microsecond latency claim | Not claimed |
 
 ## Quick Start
 
-Requirements: Bun 1.3.14+ and Rust 1.81+.
+Requirements: Bun 1.3.14+ and Rust stable. The workspace declares Rust 1.81 as its MSRV and verifies it in CI.
 
 ```bash
-git clone https://github.com/eunhhu/rune.git
-cd rune
-bun install
-cargo build -p rune-native --release
-bun run example:lunge
+git clone https://github.com/eunhhu/spellwire.git
+cd spellwire
+bun run setup
 ```
 
-Or create `macro.ts`:
-
-```ts
-import { Key, MouseButton, macro, rune } from "@rune/sdk";
-
-const lunge = macro("lunge", (m) => {
-  m.on.keyDown(Key.Q).run(
-    m.key.down(Key.E),
-    m.mouse.down(MouseButton.Left),
-    m.delay.us(80),
-    m.mouse.up(MouseButton.Left),
-    m.key.up(Key.E),
-  );
-});
-
-rune.load(lunge).start();
-```
+Compile the included stateful macro and execute it in the native VM simulator:
 
 ```bash
-bun macro.ts
+bun run compile:example
+bun run inspect:example
+bun run simulate:example
 ```
 
-Full setup, permissions, and first-run instructions: **[Quick Start](docs/quick-start.md)**.
-
-## Stateful realtime TypeScript
-
-The reason Rune uses TypeScript is not only syntax. Stateful macros can keep variables across events and use conditions, loops, and functions while still avoiding JS execution on the input hot path.
-
-```ts
-import { Key, delay, held, key, on, rt } from "@rune/sdk";
-
-rt.load(() => {
-  let combo = 0;
-
-  function burst(count: number) {
-    for (let i = 0; i < count; i++) {
-      key.tap(Key.E);
-      delay.us(40);
-    }
-  }
-
-  on.keyDown(Key.Q, () => {
-    combo++;
-
-    if (combo >= 3 && held(Key.LeftShift)) {
-      burst(2);
-      combo = 0;
-    }
-  });
-});
-```
-
-`combo`, the branch, the loop, and the function execute in Rune's native VM. Bun remains the unrestricted control plane for configuration, networking, disk I/O, UI state, plugins, and hot reload.
-
-Read **[TypeScript Runtime](docs/typescript-runtime.md)** for the execution model and supported subset.
-
-## Architecture
+`compile:example` produces:
 
 ```text
-Bun / TypeScript application
-   │
-   ├─ normal TS                configuration / I/O / UI / plugins
-   │
-   ├─ macro(...)              compile-time flat native program
-   │
-   └─ rt.load(...)            stateful TS → native bytecode
-                               │
-                               ▼
-                       Rust realtime runtime
-                 ┌───────────────────────────────┐
-physical input → │ trigger LUT → VM → injection │ → OS input stream
-                 └───────────────────────────────┘
+examples/stateful.rune.bin
+examples/stateful.rune.bin.json
 ```
 
-The intended hot path has no per-event JavaScript callback, Promise, async runtime, or hash-table lookup.
+The binary contains native VM bytecode. The JSON file is a control-plane manifest with handler counts and named persistent-state slots.
 
-## Platform backends
+See **[Quick Start](docs/quick-start.md)** for a custom script, simulator event syntax, and verification commands.
 
-| Platform | Observe | Inject | Status |
-| --- | --- | --- | --- |
-| Windows | native global input backend | `SendInput` | MVP |
-| macOS | `CGEventTap` | `CGEventPost` | MVP |
-| Linux | evdev | uinput | MVP |
+## TypeScript authoring model
 
-Scripts use Rune/USB-HID-style key identifiers instead of platform-specific scan codes.
+A Rune source file is ordinary TypeScript. The compiler scans top-level realtime registrations and lowers only the supported code reachable from their handlers.
 
-See **[Platform Notes](docs/platforms.md)** for permissions and limitations.
+```ts
+import {
+  InputSource,
+  Key,
+  MouseButton,
+  clickMouse,
+  keyDown,
+  keyHeld,
+  keyUp,
+  rt,
+  sleepUs,
+} from "@rune/sdk";
+
+let phase = 0;
+let enabled = true;
+
+function tapRepeated(key: Key, count: number): void {
+  for (let index = 0; index < count; index++) {
+    keyDown(key);
+    keyUp(key);
+  }
+}
+
+rt.onKeyDown(
+  Key.Q,
+  () => {
+    if (!enabled || keyHeld(Key.LeftShift)) return;
+
+    phase = (phase + 1) % 3;
+    tapRepeated(Key.E, phase + 1);
+
+    if (phase === 2) {
+      clickMouse(MouseButton.Left);
+      sleepUs(80);
+    }
+  },
+  { source: InputSource.Physical },
+);
+
+rt.onKeyDown(Key.F8, () => {
+  enabled = !enabled;
+});
+```
+
+Module-scope mutable integer and boolean variables referenced by realtime handlers become persistent native state. Handler-local variables become fixed VM locals. Top-level helper functions are inlined into native bytecode.
+
+There is no `rt.load()` wrapper in the current API. The `.rune.ts` module itself is the compilation unit.
+
+## Execution architecture
+
+```text
+macro.rune.ts
+    │
+    ├─ ordinary Bun/TypeScript may coexist outside the realtime dependency graph
+    │
+    └─ @rune/compiler
+           │  parse + validate + lower once
+           ▼
+      versioned .rune.bin
+           │
+           ├─ rune-sim              deterministic development runner
+           └─ rune-native C ABI     embedding boundary for a future/live host
+                      │
+                      ▼
+             trigger LUT → native VM → fixed output batches
+```
+
+The VM dispatch path does not parse TypeScript, schedule a JavaScript callback, create a Promise, or perform string/hash lookup. It uses prevalidated bytecode, fixed-capacity scratch storage, contiguous trigger buckets, and an instruction budget.
 
 ## Documentation
 
-- [Quick Start](docs/quick-start.md) — fresh clone to first macro
-- [API Reference](docs/api.md) — macro builder, runtime, keys, mouse
-- [TypeScript Runtime](docs/typescript-runtime.md) — persistent state, conditions, loops, functions
-- [Architecture](docs/architecture.md) — control plane vs realtime plane
-- [Platform Notes](docs/platforms.md) — Windows/macOS/Linux backends
-- [Overlay](docs/overlay.md) — retained native overlay design
-- [Troubleshooting](docs/troubleshooting.md) — permissions, native loading, timing issues
-- [Status](docs/status.md) — implemented vs not-yet-claimed features
+- [Documentation index](docs/index.md)
+- [Quick Start](docs/quick-start.md)
+- [API Reference](docs/api.md)
+- [TypeScript Runtime](docs/typescript-runtime.md)
+- [Architecture](docs/architecture.md)
+- [Native C ABI](docs/native-abi.md)
+- [Platform Status](docs/platforms.md)
+- [Overlay](docs/overlay.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Implementation Status](docs/status.md)
+- [Verification](docs/runtime-verification.md)
 
 ## Development
 
 ```bash
-bun install
-cargo test --workspace
-cargo build -p rune-native --release
+bun install --frozen-lockfile
 bun run typecheck
 bun run test:ts
+cargo fmt --all -- --check
+cargo test --workspace --locked
+cargo build --workspace --release --locked
 ```
 
-Run the native core benchmark:
+Run the core benchmark:
 
 ```bash
 bun run bench
 ```
 
-Rune does not currently claim a guaranteed physical-switch-to-application microsecond latency. Performance work is measured at the framework boundary using percentile/jitter distributions; USB polling, OS scheduling, and target-application polling are outside that boundary.
+The benchmark measures trigger lookup, VM execution, and a null injector. It does not measure USB polling, OS hook delivery, platform injection, or target-application polling.
 
-## Overlay
+## Performance claims
 
-The overlay is isolated from input execution and is designed as a retained native scene handed to a dedicated renderer thread. Rune will not introduce Electron/webview rendering into the realtime runtime just for convenience.
-
-See [Overlay](docs/overlay.md).
+Rune does not currently claim guaranteed microsecond physical-input latency. A meaningful claim requires each direct platform backend to exist and report p50/p95/p99/p99.9 jitter for the interval from OS-visible input to native injection submission. Physical switch latency, device polling, desktop scheduling, and target-application polling are separate scopes.
 
 ## License
 

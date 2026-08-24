@@ -6,16 +6,21 @@
     "packages/*"
   ],
   "scripts": {
+    "setup": "bun install --frozen-lockfile && bun run typecheck && cargo build --workspace --release",
     "build:native": "cargo build -p rune-native --release",
+    "build:ts": "bunx tsc -b packages/sdk packages/compiler",
+    "typecheck": "bunx tsc -b packages/sdk packages/compiler --pretty false",
+    "clean:ts": "bunx tsc -b packages/sdk packages/compiler --clean",
     "test:rust": "cargo test --workspace",
-    "test:ts": "bun test packages/sdk/test",
-    "typecheck": "bunx tsc -p packages/sdk/tsconfig.json --noEmit",
-    "check": "bun run typecheck && bun run test:ts && cargo test --workspace",
-    "example:lunge": "bun examples/lunge.ts",
+    "test:ts": "bun test packages/sdk/test packages/compiler/test",
+    "check": "bun run typecheck && bun run test:ts && cargo fmt --all -- --check && cargo test --workspace",
+    "compile:example": "bun packages/compiler/src/cli.ts examples/stateful.rune.ts",
+    "inspect:example": "cargo run -q -p rune-cli -- inspect examples/stateful.rune.bin",
+    "simulate:example": "bun run compile:example && cargo run -q -p rune-cli -- simulate examples/stateful.rune.bin key-down:Q key-up:Q key-down:Q key-up:Q key-down:Q key-up:Q",
     "bench": "cargo run -p rune-bench --release --"
   },
   "devDependencies": {
-    "@types/bun": "1.4.0",
-    "typescript": "7.0.2"
+    "@types/bun": "^1.2.21",
+    "typescript": "^5.8.3"
   }
 }

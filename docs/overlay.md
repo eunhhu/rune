@@ -1,60 +1,77 @@
-# Native overlay design
+# Overlay
 
-The overlay must not share the input thread and must not depend on per-frame JavaScript callbacks.
+The current SDK includes a retained `OverlayScene` data model. It does not create a native window or render pixels yet.
 
-## Retained scene
-
-TypeScript will create stable node IDs and update properties:
+## Current API
 
 ```ts
-const hud = overlay.create({ clickThrough: true });
-const latency = hud.text({ x: 24, y: 24, text: "-- us" });
-latency.set({ text: "42 us" });
+import { OverlayScene } from "@rune/sdk";
+
+const scene = new OverlayScene();
+
+const latencyId = scene.create({
+  kind: "text",
+  x: 24,
+  y: 24,
+  text: "-- µs",
+  size: 16,
+});
+
+scene.update(latencyId, {
+  kind: "text",
+  x: 24,
+  y: 24,
+  text: "42 µs",
+  size: 16,
+});
+
+const mutations = scene.drainMutations();
+const snapshot = scene.snapshot();
+scene.remove(latencyId);
 ```
 
-Those operations produce scene mutations on the control plane. A native renderer consumes immutable snapshots. Rendering continues when Bun is busy, and a frame never calls into JavaScript.
+Supported node shapes:
 
-Initial primitives should stay deliberately small:
+```ts
+type OverlayNode =
+  | { kind: "text"; x: number; y: number; text: string; size: number }
+  | { kind: "rect"; x: number; y: number; width: number; height: number; radius: number }
+  | { kind: "line"; x1: number; y1: number; x2: number; y2: number; width: number };
+```
 
-- rectangle and rounded rectangle
-- line
-- text
-- image
-- clip and transform
+Every create/update/remove operation records a monotonically increasing revision and a mutation. A host renderer can drain mutations or request a complete snapshot.
 
-A browser layout engine, DOM, webview, accessibility tree, and general widget toolkit are explicitly out of scope.
+The current implementation uses normal JavaScript `Map`, arrays, and `structuredClone`; it belongs to the Bun control plane, not to native input dispatch.
 
-## Snapshot handoff
+## Renderer contract
 
-The intended handoff is double- or triple-buffered:
+A future renderer should consume scene mutations/snapshots on a dedicated native thread:
 
 ```text
-Bun update → build inactive scene snapshot → atomic publish
-                                             │
-render thread ← acquire current snapshot ─────┘
+Bun scene update
+    → build/publish retained scene state
+        → native render thread
 ```
 
-Input execution has no reference to the scene lock or renderer. Overlay failure must never stop a macro.
+The input VM must not take an overlay lock, wait for a frame, or invoke JavaScript while dispatching an event. Overlay failure must not stop input execution.
 
-## Platform direction
+## Planned platform direction
 
-- **Windows:** transparent click-through topmost HWND, DirectComposition/Direct2D/DirectWrite.
-- **macOS:** transparent non-activating NSPanel, Core Animation and Core Text or Metal for larger scenes.
-- **Linux X11:** ARGB override-redirect window with an EGL-backed renderer.
-- **Linux Wayland:** capability-based support. Layer-shell works on wlroots-family compositors; no universal protocol guarantees a global always-on-top overlay on every compositor.
+- Windows: transparent click-through topmost window with DirectComposition/Direct2D/DirectWrite.
+- macOS: non-activating transparent panel with Core Animation/Core Text or Metal.
+- Linux X11: ARGB window with an EGL-backed renderer.
+- Linux Wayland: capability-based layer-shell support where the compositor provides it.
 
-## Why the MVP does not use winit + webview
+These are design directions, not current implementation claims.
 
-A cross-platform window crate can be a useful prototype, but it does not solve compositor policy and often pulls a large dependency surface into the same binary. Rune's first milestone keeps the realtime runtime dependency-free and marks overlay support unavailable until a renderer meets the isolation and capability requirements above.
+## Performance gate
 
-## Performance contract
+Before native overlay support is advertised, measurements should include:
 
-Overlay performance should be reported separately from input latency. Candidate metrics:
+- idle CPU and resident memory for a static text node;
+- scene publication time;
+- render p50/p95/p99;
+- cost at 100, 1,000, and 10,000 primitives;
+- native input dispatch p99 with overlay disabled and enabled.
 
-- idle CPU and resident memory with one static text node
-- scene-update publication time
-- render-thread frame time at p50/p95/p99
-- GPU/CPU cost for 100, 1,000, and 10,000 primitives
-- input dispatch latency with overlay disabled vs enabled
-
-The final comparison is mandatory: enabling the overlay must not measurably change the input thread's p99 latency.
+The last comparison is mandatory: enabling a static overlay must not measurably worsen input dispatch jitter.

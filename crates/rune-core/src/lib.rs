@@ -1,21 +1,20 @@
-//! Realtime, allocation-free macro execution primitives used by Rune.
-//!
-//! `rune-core` deliberately has no third-party dependencies. The control plane may allocate while
-//! decoding and compiling programs, but dispatching an input event does not allocate or invoke
-//! JavaScript.
-
-mod executor;
+mod bytecode;
 mod model;
 mod program;
+mod vm;
 mod wire;
 
-pub use executor::{
-    DispatchError, DispatchReport, Engine, ExecutionConfig, ExecutionScratch, Injector,
-    MAX_OUTPUT_BATCH,
+pub use bytecode::{
+    Instruction, Opcode, FLAG_STACK_OPERANDS, WIRE_HANDLER_SIZE, WIRE_HEADER_SIZE,
+    WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION,
 };
 pub use model::{
-    key, Action, Edge, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent,
-    SourceFilter, Trigger,
+    key, Edge, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent, SourceFilter,
+    Trigger,
 };
-pub use program::{Program, ProgramSet, ProgramSetError, MAX_KEY_CODE, MAX_MOUSE_BUTTON};
-pub use wire::{decode_program_set, DecodeError, WIRE_MAGIC, WIRE_VERSION};
+pub use program::{Handler, HandlerTable, MatchingHandlers, Program, ProgramError};
+pub use vm::{
+    validate_program, DispatchError, DispatchReport, Injector, InputState, Runtime, RuntimeConfig,
+    VmError, VmScratch, MAX_LOCALS, MAX_OUTPUT_BATCH, MAX_STACK,
+};
+pub use wire::DecodeError;
