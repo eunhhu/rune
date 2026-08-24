@@ -5,17 +5,13 @@ on:
     branches: ["fix/materialize-runtime"]
     paths:
       - ".github/workflows/prepare-merge-ready.yml"
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/prepare-merge-ready.yml"
 
 permissions:
   contents: write
 
 concurrency:
   group: rune-materialize-merge-ready
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   materialize:
