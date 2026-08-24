@@ -7,7 +7,7 @@ import shutil
 import tarfile
 from pathlib import Path
 
-EXPECTED_SHA256 = "c2e6adbf978923db004f49e069a5ca4c4d321275b0bcd705ffc91990b8227439"
+EXPECTED_SHA256 = "6c566c86ba2c32fef2987f2e52ed5939cb6fa0a54d13565eaedc2b88615735b3"
 
 root = Path(__file__).resolve().parents[1]
 bootstrap = root / ".bootstrap"
@@ -24,8 +24,6 @@ if actual_sha256 != EXPECTED_SHA256:
         f"source payload checksum mismatch: expected {EXPECTED_SHA256}, got {actual_sha256}"
     )
 
-# Keep the one-shot workflow alive for the commit that materializes the source.
-# It is deleted explicitly after the verified source commit lands.
 workflow = root / ".github" / "workflows" / "bootstrap.yml"
 workflow_bytes = workflow.read_bytes()
 
