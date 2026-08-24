@@ -12,21 +12,94 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run test:ts
-      - run: npm publish --workspace spellwire --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: npm publish --workspace create-spellwire --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify workspace
+        run: |
+          set -euo pipefail
+          bun run typecheck
+          bun run test:ts
+          bun run pack:dry-run
+
+      - name: Verify npm credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::Repository secret NPM_TOKEN is missing or empty."
+            exit 1
+          fi
+
+          echo "registry=$(npm config get registry)"
+          echo "npm=$(npm --version) node=$(node --version)"
+          npm whoami --registry=https://registry.npmjs.org/
+
+      - name: Publish packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          publish_package() {
+            package_dir="$1"
+            name="$(node -p "require('./${package_dir}/package.json').name")"
+            version="$(node -p "require('./${package_dir}/package.json').version")"
+            spec="${name}@${version}"
+
+            echo "Checking ${spec}..."
+            view_error="$(mktemp)"
+            if repository="$(npm view "${spec}" repository.url --json 2>"${view_error}")"; then
+              if printf '%s' "${repository}" | grep -Fq "github.com/eunhhu/spellwire"; then
+                echo "${spec} is already published from this repository; skipping."
+                rm -f "${view_error}"
+                return 0
+              fi
+
+              echo "::error::${spec} already exists on npm but is not linked to github.com/eunhhu/spellwire."
+              printf '%s\n' "${repository}"
+              rm -f "${view_error}"
+              return 1
+            fi
+
+            if ! grep -Eq 'E404|404 Not Found|is not in this registry' "${view_error}"; then
+              echo "::error::Unable to query npm for ${spec}."
+              cat "${view_error}"
+              rm -f "${view_error}"
+              return 1
+            fi
+            rm -f "${view_error}"
+
+            echo "Publishing ${spec}..."
+            npm publish "./${package_dir}" --provenance --access public
+          }
+
+          # create-spellwire scaffolds projects that depend on spellwire, so publish the
+          # runtime package first. The existence check makes failed runs safe to retry.
+          publish_package packages/spellwire
+          publish_package packages/create-spellwire
+
+      - name: Verify published versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          spellwire_version="$(node -p "require('./packages/spellwire/package.json').version")"
+          create_version="$(node -p "require('./packages/create-spellwire/package.json').version")"
+          test "$(npm view "spellwire@${spellwire_version}" version)" = "${spellwire_version}"
+          test "$(npm view "create-spellwire@${create_version}" version)" = "${create_version}"
+          echo "Published spellwire@${spellwire_version} and create-spellwire@${create_version}."
