@@ -67,14 +67,13 @@ export async function createSpellwireProject(
     `import { Key, rt, tapKey } from "spellwire";\n\n` +
       `let enabled = true;\n` +
       `let presses = 0;\n\n` +
-      `rt.onKeyDown(Key.Q, () => {\n` +
-      `  if (!enabled) return;\n` +
+      `rt.hotkey("Q", () => {\n` +
       `  presses += 1;\n` +
       `  if (presses % 2 === 0) tapKey(Key.E);\n` +
-      `});\n\n` +
-      `rt.onKeyDown(Key.F8, () => {\n` +
+      `}, { when: () => enabled });\n\n` +
+      `rt.hotkey("F8", () => {\n` +
       `  enabled = !enabled;\n` +
-      `});\n`,
+      `}, { consume: false });\n`,
   );
 
   await Bun.write(
@@ -127,7 +126,8 @@ export async function createSpellwireProject(
       `\`\`\`\n\n` +
       `Edit \`src/main.spellwire.ts\` for realtime logic and \`src/app.ts\` for the ` +
       `state-driven overlay. The first live run requests required global ` +
-      `input permissions. Press \`Ctrl+C\` to stop and release held synthetic input.\n`,
+      `input permissions. String hotkeys compile to native chords; the \`when\` gate makes ` +
+      `inactive input pass through. Press \`Ctrl+C\` to stop and release held synthetic input.\n`,
   );
   await Bun.write(
     `${target}/README.ko.md`,
@@ -144,7 +144,8 @@ export async function createSpellwireProject(
       `\`\`\`\n\n` +
       `realtime 로직은 \`src/main.spellwire.ts\`, 상태 기반 overlay는 \`src/app.ts\`에서 ` +
       `편집하십시오. 첫 live run은 필요한 전역 입력 권한을 ` +
-      `요청합니다. \`Ctrl+C\`로 종료하면 눌린 상태의 합성 입력도 해제합니다.\n`,
+      `요청합니다. 문자열 hotkey는 native chord로 compile되며 \`when\` gate가 꺼진 입력은 ` +
+      `원래 앱으로 통과합니다. \`Ctrl+C\`로 종료하면 눌린 상태의 합성 입력도 해제합니다.\n`,
   );
   await Bun.write(`${target}/.gitignore`, "node_modules/\ndist/\n*.spellwire.bin*\n");
 

@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createSpellwireProject } from "../src/index";
+
+const spellwireCli = fileURLToPath(new URL("../../spellwire/src/cli.ts", import.meta.url));
 
 test("creates a buildable Spellwire project", async () => {
   const target = join(tmpdir(), `spellwire-${crypto.randomUUID()}`);
@@ -18,7 +21,27 @@ test("creates a buildable Spellwire project", async () => {
     expect(packageJson.scripts.build).toBe(
       "spellwire compile src/main.spellwire.ts dist/main.spellwire.bin",
     );
-    expect(await Bun.file(join(target, "src/main.spellwire.ts")).exists()).toBe(true);
+    const realtime = await Bun.file(join(target, "src/main.spellwire.ts")).text();
+    expect(realtime).toContain('rt.hotkey("Q"');
+    expect(realtime).toContain("when: () => enabled");
+    const output = join(target, "dist/main.spellwire.bin");
+    const compiler = Bun.spawn(
+      [
+        process.execPath,
+        spellwireCli,
+        "compile",
+        join(target, "src/main.spellwire.ts"),
+        output,
+      ],
+      { stdout: "ignore", stderr: "pipe" },
+    );
+    const [exitCode, stderr] = await Promise.all([
+      compiler.exited,
+      new Response(compiler.stderr).text(),
+    ]);
+    if (exitCode !== 0) throw new Error(`generated project failed to compile: ${stderr.trim()}`);
+    expect(await Bun.file(output).exists()).toBe(true);
+    expect(await Bun.file(`${output}.json`).exists()).toBe(true);
     const app = await Bun.file(join(target, "src/app.ts")).text();
     expect(app).toContain("Spellwire.start");
     expect(app).toContain("ui.column");
