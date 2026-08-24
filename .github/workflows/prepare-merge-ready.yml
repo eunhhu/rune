@@ -100,6 +100,10 @@ jobs:
               "InputDevice, InputEvent, MouseButton",
           )
           text = text.replace(
+              "scratch.push($value, stack_limit).map_err(ExecutionFailure::Vm)?",
+              "{ let value = $value; scratch.push(value, stack_limit).map_err(ExecutionFailure::Vm)? }",
+          )
+          text = text.replace(
               "binary!(|left, right| left.wrapping_shl((right as u32) & 63))",
               "binary!(|left: i64, right: i64| left.wrapping_shl((right as u32) & 63))",
           )
