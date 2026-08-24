@@ -1,26 +1,26 @@
 {
-  "name": "rune-workspace",
+  "name": "spellwire-workspace",
   "private": true,
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.0",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "setup": "bun install --frozen-lockfile && bun run typecheck && cargo build --workspace --release",
-    "build:native": "cargo build -p rune-native --release",
-    "build:ts": "bunx tsc -b packages/sdk packages/compiler",
-    "typecheck": "bunx tsc -b packages/sdk packages/compiler --pretty false",
-    "clean:ts": "bunx tsc -b packages/sdk packages/compiler --clean",
-    "test:rust": "cargo test --workspace",
-    "test:ts": "bun test packages/sdk/test packages/compiler/test",
-    "check": "bun run typecheck && bun run test:ts && cargo fmt --all -- --check && cargo test --workspace",
-    "compile:example": "bun packages/compiler/src/cli.ts examples/stateful.rune.ts",
-    "inspect:example": "cargo run -q -p rune-cli -- inspect examples/stateful.rune.bin",
-    "simulate:example": "bun run compile:example && cargo run -q -p rune-cli -- simulate examples/stateful.rune.bin key-down:Q key-up:Q key-down:Q key-up:Q key-down:Q key-up:Q",
-    "bench": "cargo run -p rune-bench --release --"
+    "setup": "bun install --frozen-lockfile && bun run typecheck && cargo build --workspace --release --locked",
+    "build:native": "cargo build -p spellwire-native --release --locked",
+    "typecheck": "bunx tsc -b packages/spellwire packages/create-spellwire --pretty false",
+    "clean:ts": "bunx tsc -b packages/spellwire packages/create-spellwire --clean",
+    "test:rust": "cargo test --workspace --locked",
+    "test:ts": "bun test packages/spellwire/test packages/create-spellwire/test",
+    "check": "bun run typecheck && bun run test:ts && cargo fmt --all -- --check && cargo test --workspace --locked",
+    "compile:example": "bun packages/spellwire/src/cli.ts compile examples/stateful.spellwire.ts",
+    "inspect:example": "cargo run -q -p spellwire-cli --locked -- inspect examples/stateful.spellwire.bin",
+    "simulate:example": "bun run compile:example && cargo run -q -p spellwire-cli --locked -- simulate examples/stateful.spellwire.bin key-down:Q key-up:Q key-down:Q key-up:Q key-down:Q key-up:Q",
+    "bench": "cargo run -p spellwire-bench --release --locked --",
+    "pack:dry-run": "npm pack --dry-run --workspace spellwire && npm pack --dry-run --workspace create-spellwire"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.21",
+    "@types/bun": "^1.4.0",
     "typescript": "^5.8.3"
   }
 }

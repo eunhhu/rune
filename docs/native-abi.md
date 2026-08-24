@@ -1,26 +1,26 @@
 # Native C ABI
 
-`rune-native` is built as a `cdylib` and `rlib`. The C ABI is a small host-driven boundary around the native VM.
+`spellwire-native` is built as a `cdylib` and `rlib`. The C ABI is a small host-driven boundary around the native VM.
 
 Build it:
 
 ```bash
-cargo build -p rune-native --release
+cargo build -p spellwire-native --release --locked
 ```
 
 Artifacts are named according to the platform:
 
 ```text
-Windows: target/release/rune_native.dll
-macOS:   target/release/librune_native.dylib
-Linux:   target/release/librune_native.so
+Windows: target/release/spellwire_native.dll
+macOS:   target/release/libspellwire_native.dylib
+Linux:   target/release/libspellwire_native.so
 ```
 
 ## Version and capabilities
 
 ```c
-uint32_t rune_abi_version(void);
-uint32_t rune_capabilities(void);
+uint32_t spellwire_abi_version(void);
+uint32_t spellwire_capabilities(void);
 ```
 
 The current ABI version is `2`.
@@ -39,33 +39,33 @@ The current implementation returns only `HostCallbackInjection`.
 ## Engine lifecycle
 
 ```c
-RuneEngine *rune_engine_new(const uint8_t *bytes, size_t len);
-void rune_engine_free(RuneEngine *engine);
+SpellwireEngine *spellwire_engine_new(const uint8_t *bytes, size_t len);
+void spellwire_engine_free(SpellwireEngine *engine);
 ```
 
-`rune_engine_new` decodes and validates a complete `.rune.bin` buffer and copies the program into owned native memory. It returns null on invalid input.
+`spellwire_engine_new` decodes and validates a complete `.spellwire.bin` buffer and copies the program into owned native memory. It returns null on invalid input.
 
 The engine pointer is single-owner and must be freed exactly once.
 
 ## Output callback
 
 ```c
-typedef int32_t (*RuneOutputCallback)(
+typedef int32_t (*SpellwireOutputCallback)(
   void *context,
-  const RuneOutputEvent *events,
+  const SpellwireOutputEvent *events,
   size_t event_count
 );
 
-int32_t rune_engine_set_output_callback(
-  RuneEngine *engine,
-  RuneOutputCallback callback,
+int32_t spellwire_engine_set_output_callback(
+  SpellwireEngine *engine,
+  SpellwireOutputCallback callback,
   void *context
 );
 ```
 
 Each callback receives one contiguous zero-delay output batch. Returning zero reports success; any non-zero status aborts the current dispatch as an injection error.
 
-`RuneOutputEvent` is a fixed C representation:
+`SpellwireOutputEvent` is a fixed C representation:
 
 ```c
 typedef struct {
@@ -74,7 +74,7 @@ typedef struct {
   uint16_t code;
   int32_t x;
   int32_t y;
-} RuneOutputEvent;
+} SpellwireOutputEvent;
 ```
 
 Kinds:
@@ -91,8 +91,8 @@ A null callback is allowed; output batches are then discarded.
 ## Explicit event dispatch
 
 ```c
-int32_t rune_engine_dispatch(
-  RuneEngine *engine,
+int32_t spellwire_engine_dispatch(
+  SpellwireEngine *engine,
   uint8_t device,
   uint16_t code,
   uint8_t edge,
@@ -115,14 +115,14 @@ The ABI does **not** currently start a platform observer thread. The host is res
 ## Persistent state
 
 ```c
-int32_t rune_engine_state_get(
-  const RuneEngine *engine,
+int32_t spellwire_engine_state_get(
+  const SpellwireEngine *engine,
   size_t slot,
   int64_t *output
 );
 
-int32_t rune_engine_state_set(
-  RuneEngine *engine,
+int32_t spellwire_engine_state_set(
+  SpellwireEngine *engine,
   size_t slot,
   int64_t value
 );

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -37,16 +37,17 @@ jobs:
       - run: cargo check --workspace --locked
 
   typescript:
-    name: Bun / TypeScript
+    name: Bun / TypeScript / npm packages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test:ts
+      - run: bun run pack:dry-run
 
   quickstart:
     name: Quick Start smoke test
@@ -56,8 +57,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - run: bun run compile:example
-      - run: cargo run -q -p rune-cli --locked -- inspect examples/stateful.rune.bin
-      - run: cargo run -q -p rune-cli --locked -- simulate examples/stateful.rune.bin key-down:Q key-up:Q key-down:Q key-up:Q key-down:Q key-up:Q
+      - run: bun run inspect:example
+      - run: bun run simulate:example

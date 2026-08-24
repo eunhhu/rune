@@ -1,40 +1,43 @@
 {
-  "lockfileVersion": 1,
+  "lockfileVersion": 2,
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "rune-workspace",
+      "name": "spellwire-workspace",
       "devDependencies": {
-        "@types/bun": "^1.2.21",
+        "@types/bun": "^1.4.0",
         "typescript": "^5.8.3",
       },
     },
-    "packages/compiler": {
-      "name": "@rune/compiler",
+    "packages/create-spellwire": {
+      "name": "create-spellwire",
       "version": "0.1.0",
       "bin": {
-        "rune-compile": "./src/cli.ts",
-      },
-      "dependencies": {
-        "@rune/sdk": "workspace:*",
-        "typescript": "^5.8.3",
+        "create-spellwire": "./src/index.ts",
       },
     },
-    "packages/sdk": {
-      "name": "@rune/sdk",
+    "packages/spellwire": {
+      "name": "spellwire",
       "version": "0.1.0",
+      "bin": {
+        "spellwire": "./src/cli.ts",
+        "spellwire-compile": "./src/cli.ts",
+      },
+      "dependencies": {
+        "typescript": "^5.8.3",
+      },
     },
   },
   "packages": {
-    "@rune/compiler": ["@rune/compiler@workspace:packages/compiler"],
-
-    "@rune/sdk": ["@rune/sdk@workspace:packages/sdk"],
-
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
     "@types/node": ["@types/node@26.2.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg=="],
 
     "bun-types": ["bun-types@1.4.0", "", { "dependencies": { "@types/node": "*" } }, "sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q=="],
+
+    "create-spellwire": ["create-spellwire@workspace:packages/create-spellwire"],
+
+    "spellwire": ["spellwire@workspace:packages/spellwire"],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

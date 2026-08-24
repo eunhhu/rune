@@ -3,26 +3,26 @@
 version = 3
 
 [[package]]
-name = "rune-bench"
+name = "spellwire-bench"
 version = "0.1.0"
 dependencies = [
- "rune-core",
+ "spellwire-core",
 ]
 
 [[package]]
-name = "rune-cli"
+name = "spellwire-cli"
 version = "0.1.0"
 dependencies = [
- "rune-core",
+ "spellwire-core",
 ]
 
 [[package]]
-name = "rune-core"
+name = "spellwire-core"
 version = "0.1.0"
 
 [[package]]
-name = "rune-native"
+name = "spellwire-native"
 version = "0.1.0"
 dependencies = [
- "rune-core",
+ "spellwire-core",
 ]

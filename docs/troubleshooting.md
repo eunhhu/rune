@@ -1,6 +1,6 @@
 # Troubleshooting
 
-## `@rune/sdk` or `@rune/compiler` cannot be resolved
+## `spellwire` or `spellwire/compiler` cannot be resolved
 
 Install the workspace with Bun:
 
@@ -57,22 +57,22 @@ The current runtime uses an absolute deadline and a spin tail, but a general-pur
 
 Microsecond input is a deadline request, not a physical end-to-end guarantee.
 
-## `bun macro.rune.ts` produces no global keyboard events
+## `bun macro.spellwire.ts` produces no global keyboard events
 
 That is expected in the current branch. Executing the source directly registers JavaScript fallback handlers; it does not install a Windows/macOS/Linux observer.
 
 Use:
 
 ```bash
-bun packages/compiler/src/cli.ts macro.rune.ts
-cargo run -q -p rune-cli -- simulate macro.rune.bin key-down:Q key-up:Q
+bunx spellwire compile macro.spellwire.ts
+cargo run -q -p spellwire-cli --locked -- simulate macro.spellwire.bin key-down:Q key-up:Q
 ```
 
 Direct OS backends are listed as planned in [Platform Status](platforms.md).
 
 ## Native library output does nothing
 
-`rune-native` discards output if no host callback is installed. A host must call `rune_engine_set_output_callback` and translate received batches to its platform injection API.
+`spellwire-native` discards output if no host callback is installed. A host must call `spellwire_engine_set_output_callback` and translate received batches to its platform injection API.
 
 The ABI does not currently provide `start()` or `stop()` functions for global observation. See [Native C ABI](native-abi.md).
 
@@ -95,8 +95,8 @@ The optional source is `physical` or `synthetic`. Handler filters may use `Input
 Compiler outputs and TypeScript build products are ignored by Git:
 
 ```text
-*.rune.bin
-*.rune.bin.json
+*.spellwire.bin
+*.spellwire.bin.json
 packages/*/dist/
 *.tsbuildinfo
 ```
@@ -105,7 +105,7 @@ Remove TypeScript build outputs with `bun run clean:ts`.
 
 ## Rust tests pass but Clippy prints warnings
 
-The workspace enables `clippy::pedantic` as warnings. During the MVP, Clippy runs in CI but pedantic findings are advisory rather than merge-blocking. Build/test failures remain blockers.
+The workspace enables `clippy::pedantic` at warning level. CI runs Clippy on every target, but it does not pass `-D warnings`; warnings remain visible while compile/test failures are blocking.
 
 ## Verify everything locally
 
@@ -124,7 +124,7 @@ Include:
 - OS and CPU;
 - Bun and Rust versions;
 - commit SHA;
-- minimal `.rune.ts` source;
+- minimal `.spellwire.ts` source;
 - compiler diagnostic or simulator output;
 - generated manifest when state mapping matters.
 

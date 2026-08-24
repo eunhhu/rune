@@ -1,6 +1,6 @@
 # API Reference
 
-This page documents the API that exists in the current source tree. It deliberately excludes older design sketches such as `macro(...)`, `rune.start()`, `rt.load(...)`, `on.keyDown(...)`, or `key.tap(...)`; those symbols are not exported by the current SDK.
+This page documents the API that exists in the current source tree. It deliberately excludes older design sketches such as `macro(...)`, `spellwire.start()`, `rt.load(...)`, `on.keyDown(...)`, or `key.tap(...)`; those symbols are not exported by the current SDK.
 
 ## Package imports
 
@@ -21,17 +21,17 @@ import {
   sleepUs,
   tapKey,
   wheelMouse,
-} from "@rune/sdk";
+} from "spellwire";
 ```
 
 The compiler package exports programmatic compiler/encoder APIs and a CLI:
 
 ```ts
-import { compileSource, encodeModule } from "@rune/compiler";
+import { compileSource, encodeModule } from "spellwire/compiler";
 ```
 
 ```bash
-bun packages/compiler/src/cli.ts macro.rune.ts [output.rune.bin]
+bunx spellwire compile macro.spellwire.ts [output.spellwire.bin]
 ```
 
 ## Realtime registration
@@ -127,7 +127,7 @@ MouseButton.Forward
 
 ```ts
 const result = compileSource(source, {
-  fileName: "macro.rune.ts",
+  fileName: "macro.spellwire.ts",
   stackLimit: 128,
   instructionBudget: 100_000,
 });
@@ -140,11 +140,11 @@ Returns:
 
 Defaults are a stack limit of 128 and an instruction budget of 100,000 per handler dispatch. The native runtime caps the stack and local arrays at 256 entries.
 
-Compilation failures throw `RuneCompileError` with file, line, column, and message diagnostics.
+Compilation failures throw `SpellwireCompileError` with file, line, column, and message diagnostics.
 
 ### `encodeModule(module)`
 
-Serializes a compiled module to the versioned native binary format consumed by `rune-core::Program::decode` and `rune_engine_new`.
+Serializes a compiled module to the versioned native binary format consumed by `spellwire-core::Program::decode` and `spellwire_engine_new`.
 
 ## JavaScript fallback/debug API
 

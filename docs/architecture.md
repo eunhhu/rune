@@ -1,10 +1,10 @@
 # Architecture
 
-Rune is currently composed of five explicit layers: TypeScript SDK, AOT compiler, versioned wire format, native VM, and host boundary.
+Spellwire is currently composed of six explicit layers: public TypeScript package, AOT compiler, versioned wire format, native VM, simulator, and host boundary.
 
 ## 1. TypeScript SDK
 
-`@rune/sdk` supplies:
+`spellwire` supplies the SDK and compiler exports:
 
 - USB HID-style `Key` identifiers and mouse buttons;
 - top-level `rt.on*` handler markers;
@@ -18,7 +18,7 @@ The handler markers are ordinary TypeScript functions when executed by Bun, whic
 
 ## 2. AOT compiler
 
-`@rune/compiler` parses TypeScript with the TypeScript compiler API, collects representable module state, finds top-level realtime registrations, resolves constants, validates the supported subset, and lowers handlers to an integer bytecode instruction stream.
+The compiler embedded in `spellwire` parses TypeScript with the TypeScript compiler API, collects representable module state, finds top-level realtime registrations, resolves constants, validates the supported subset, and lowers handlers to an integer bytecode instruction stream.
 
 ```text
 module-scope let/const
@@ -34,14 +34,14 @@ Compilation happens once. No AST, source string, or TypeScript runtime is needed
 
 ## 3. Wire format
 
-The encoder writes a versioned `RUNE` binary containing:
+The encoder writes a versioned `SPWR` binary containing:
 
 - header/version and resource limits;
 - initial persistent-state values;
 - triggers and bytecode entry points;
 - fixed-width instructions.
 
-`rune-core::Program::decode` validates structural bounds before `Runtime::new` validates entries, jumps, state/local slots, stack limits, and instruction budgets.
+`spellwire-core::Program::decode` validates structural bounds before `Runtime::new` validates entries, jumps, state/local slots, stack limits, and instruction budgets.
 
 The companion JSON manifest is control-plane metadata; it is not read on the native input path.
 
@@ -69,26 +69,26 @@ fixed 64-event output batches
 
 ## 5. Host boundary
 
-`rune-native` exposes a C ABI. A host passes a compiled binary, dispatches explicit events, reads/writes state slots, and receives output batches through a callback.
+`spellwire-native` exposes a C ABI. A host passes a compiled binary, dispatches explicit events, reads/writes state slots, and receives output batches through a callback.
 
 The current ABI is deliberately host-driven:
 
 ```text
-host observes input → rune_engine_dispatch(...)
+host observes input → spellwire_engine_dispatch(...)
                     → VM output callback → host injects output
 ```
 
-The repository does not yet contain a host that owns Windows Raw Input/hooks, a macOS event tap, or Linux evdev/uinput. Consequently, only host-callback injection is advertised by `rune_capabilities()`.
+The repository does not yet contain a host that owns Windows Raw Input/hooks, a macOS event tap, or Linux evdev/uinput. Consequently, only host-callback injection is advertised by `spellwire_capabilities()`.
 
 ## Native simulator
 
-`rune-sim` is a deterministic development host built directly on `rune-core`. It loads the same encoded binary, dispatches named input events, records native output batches, and prints persistent state after each event.
+`spellwire-sim` is a deterministic development host built directly on `spellwire-core`. It loads the same encoded binary, dispatches named input events, records native output batches, and prints persistent state after each event.
 
 It is useful for API/compiler/VM feedback, but it intentionally does not pretend to measure platform input latency.
 
 ## Two TypeScript lanes
 
-Rune's intended application split is:
+Spellwire's intended application split is:
 
 ```text
 ordinary Bun/TypeScript

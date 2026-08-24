@@ -1,6 +1,6 @@
 # TypeScript Runtime
 
-Rune uses TypeScript as an authoring language and compiles the latency-sensitive subset ahead of time. A source file does not need a wrapper such as `rt.load()`; the `.rune.ts` module itself is the compilation unit.
+Spellwire uses TypeScript as an authoring language and compiles the latency-sensitive subset ahead of time. A source file does not need a wrapper such as `rt.load()`; the `.spellwire.ts` module itself is the compilation unit.
 
 ## Compilation boundary
 
@@ -28,11 +28,11 @@ rt.onKeyDown(Key.Q, () => {
 });
 ```
 
-The state survives after the handler returns. The generated `.rune.bin.json` manifest maps each source name to its native slot and kind.
+The state survives after the handler returns. The generated `.spellwire.bin.json` manifest maps each source name to its native slot and kind.
 
 Module-scope `const` declarations are folded as compile-time constants when possible.
 
-Rune numbers on the realtime plane are signed 64-bit integers. Numeric literals must be safe JavaScript integers at compile time. Booleans are represented as native integer truth values.
+Spellwire numbers on the realtime plane are signed 64-bit integers. Numeric literals must be safe JavaScript integers at compile time. Booleans are represented as native integer truth values.
 
 ## Handler-local variables
 
@@ -174,6 +174,6 @@ Programs are validated before dispatch. Invalid jumps, slots, entries, limits, a
 
 ## Fallback execution
 
-Executing a `.rune.ts` module directly with Bun records the `rt.on*` registrations in a JavaScript fallback list. With `withRealtimeActionSink()`, tests can call those handlers and observe their actions.
+Executing a `.spellwire.ts` module directly with Bun records the `rt.on*` registrations in a JavaScript fallback list. With `withRealtimeActionSink()`, tests can call those handlers and observe their actions.
 
 That fallback preserves useful semantics for debugging, but it is not the native AOT path and carries no realtime latency guarantee.

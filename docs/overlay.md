@@ -5,7 +5,7 @@ The current SDK includes a retained `OverlayScene` data model. It does not creat
 ## Current API
 
 ```ts
-import { OverlayScene } from "@rune/sdk";
+import { OverlayScene } from "spellwire";
 
 const scene = new OverlayScene();
 

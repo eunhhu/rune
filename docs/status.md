@@ -1,11 +1,12 @@
 # Implementation Status
 
-Rune is an early compiler/native-VM MVP. This page separates verified implementation from design intent.
+Spellwire is an early compiler/native-VM MVP. This page separates verified implementation from design intent.
 
 ## Implemented and tested
 
 - complete committed source tree; no post-merge source-generation workflow;
-- TypeScript workspace packages for SDK and compiler;
+- public `spellwire` package containing the SDK, compiler, and TypeScript CLI;
+- `create-spellwire` project scaffolder and npm package dry-run coverage;
 - TypeScript AST compiler with source diagnostics;
 - module-scope persistent integer/boolean state;
 - conditions, loops, assignments, updates, and inlined void helper functions;
@@ -17,7 +18,7 @@ Rune is an early compiler/native-VM MVP. This page separates verified implementa
 - bounded native VM stack, locals, output batch, and instruction budget;
 - absolute-deadline synchronous delays;
 - C ABI for engine lifecycle, explicit dispatch, state slots, and output callback batches;
-- deterministic `rune-sim` inspector/simulator;
+- deterministic `spellwire-sim` inspector/simulator;
 - JavaScript fallback action sink and SPSC dynamic lane;
 - retained overlay scene/mutation model;
 - Rust and TypeScript unit tests;
@@ -32,13 +33,13 @@ Rune is an early compiler/native-VM MVP. This page separates verified implementa
 - non-blocking continuation/deadline scheduling for delayed handlers;
 - native transparent overlay windows/renderers;
 - complete international/vendor-specific key translation;
-- prebuilt native artifacts, signing/notarization, and package publication;
+- prebuilt native artifacts, signing/notarization, and first npm publication;
 - platform submission-latency benchmarks;
 - physical end-to-end latency measurements.
 
 ## Current capability flag
 
-`rune_capabilities()` currently reports only:
+`spellwire_capabilities()` currently reports only:
 
 ```text
 HostCallbackInjection
@@ -62,12 +63,12 @@ The host should expose capability and permission errors rather than pretending a
 
 After one backend works end-to-end, the same benchmark harness should report core dispatch and host submission separately before performance claims are published.
 
-## Merge-readiness definition for this PR
+## Merge-readiness definition
 
 This PR is merge-ready only when:
 
 - the actual source is visible in the branch;
 - old bootstrap/shipping workflows are removed;
-- permanent CI is green;
+- permanent cross-platform CI and package dry-runs are green;
 - the documented Quick Start succeeds from a fresh checkout;
 - docs do not claim direct OS input or overlay rendering that the code does not contain.

@@ -1,10 +1,28 @@
 # Quick Start
 
-This guide starts from a fresh clone, compiles a stateful TypeScript macro, and executes the resulting bytecode in Rune's native Rust VM.
+Spellwire can be installed into an existing Bun project or tested from a source checkout. The current alpha compiles stateful TypeScript into native bytecode and runs that bytecode through the real Rust VM simulator. It does **not** yet install a global keyboard/mouse observer.
 
-The current branch does **not** install a global keyboard/mouse hook. Its runnable development path is compiler + native VM simulation. That is enough to evaluate the TypeScript API, persistent-state semantics, control flow, output batching, binary format, and VM diagnostics before direct OS backends land.
+## Install from npm
 
-## Requirements
+After the first npm release:
+
+```bash
+bun add spellwire
+```
+
+Or scaffold a project:
+
+```bash
+bun create spellwire my-automation
+cd my-automation
+bun run check
+```
+
+The generated project can author and compile `.spellwire.ts` modules. Live global input still requires a host/backend that is not bundled in this alpha.
+
+## Develop from source
+
+### Requirements
 
 - Bun 1.3.14 or newer
 - Rust stable
@@ -12,7 +30,7 @@ The current branch does **not** install a global keyboard/mouse hook. Its runnab
 
 The workspace declares Rust 1.81 as its minimum supported Rust version and checks that version in CI.
 
-## 1. Clone and build
+### 1. Clone and build
 
 ```bash
 git clone https://github.com/eunhhu/spellwire.git
@@ -22,7 +40,7 @@ bun run setup
 
 `bun run setup` performs a frozen Bun install, builds the TypeScript project references, and builds the complete Rust workspace in release mode.
 
-## 2. Compile the included macro
+### 2. Compile the included macro
 
 ```bash
 bun run compile:example
@@ -31,8 +49,8 @@ bun run compile:example
 Expected files:
 
 ```text
-examples/stateful.rune.bin
-examples/stateful.rune.bin.json
+examples/stateful.spellwire.bin
+examples/stateful.spellwire.bin.json
 ```
 
 Inspect the compiled native program:
@@ -43,7 +61,7 @@ bun run inspect:example
 
 The inspector prints handler count, persistent-state count, instruction count, resource limits, initial state, trigger source, and bytecode entry points.
 
-## 3. Run the native VM simulator
+### 3. Run the native VM simulator
 
 ```bash
 bun run simulate:example
@@ -59,9 +77,9 @@ The script dispatches three `Q` press/release pairs into the real Rust VM. For e
 
 The example changes `phase` across events, emits a variable number of `E` taps, and conditionally emits a left click plus an 80 µs VM delay.
 
-## 4. Create a macro
+### 4. Create a macro
 
-Create `macro.rune.ts`:
+Create `macro.spellwire.ts`:
 
 ```ts
 import {
@@ -74,7 +92,7 @@ import {
   keyUp,
   rt,
   sleepUs,
-} from "@rune/sdk";
+} from "spellwire";
 
 let combo = 0;
 let enabled = true;
@@ -110,14 +128,14 @@ rt.onKeyDown(Key.F8, () => {
 Compile it:
 
 ```bash
-bun packages/compiler/src/cli.ts macro.rune.ts
+bunx spellwire compile macro.spellwire.ts
 ```
 
 Inspect and simulate it:
 
 ```bash
-cargo run -q -p rune-cli -- inspect macro.rune.bin
-cargo run -q -p rune-cli -- simulate macro.rune.bin \
+cargo run -q -p spellwire-cli --locked -- inspect macro.spellwire.bin
+cargo run -q -p spellwire-cli --locked -- simulate macro.spellwire.bin \
   key-down:Q key-up:Q \
   key-down:Q key-up:Q \
   key-down:Q key-up:Q
@@ -141,7 +159,7 @@ Key names are case-insensitive and ignore hyphens/underscores. Common USB HID na
 
 ## Generated manifest
 
-The compiler writes `<program>.rune.bin.json` next to the binary. Its `states` object maps source names to numeric native slots:
+The compiler writes `<program>.spellwire.bin.json` next to the binary. Its `states` object maps source names to numeric native slots:
 
 ```json
 {
@@ -165,10 +183,10 @@ The permanent GitHub workflow additionally runs Rust tests/builds on Linux, macO
 
 ## Live system input status
 
-`rune-native` currently exposes a host-callback ABI and reports only `HostCallbackInjection`. It does not yet expose a function that starts Windows Raw Input/hooks, a macOS event tap, or Linux evdev/uinput processing. Therefore:
+`spellwire-native` currently exposes a host-callback ABI and reports only `HostCallbackInjection`. It does not yet expose a function that starts Windows Raw Input/hooks, a macOS event tap, or Linux evdev/uinput processing. Therefore:
 
 - the simulator requires no Accessibility/Input Monitoring/udev permissions;
 - running the TypeScript source directly with Bun registers JavaScript fallback handlers but does not observe global input;
-- any document or example claiming that `bun macro.ts` already installs a cross-platform global hook is outdated.
+- any document or example claiming that `bun macro.spellwire.ts` already installs a cross-platform global hook is outdated.
 
 See [Platform Status](platforms.md) and [Implementation Status](status.md) for the next milestone.

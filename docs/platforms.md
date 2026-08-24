@@ -1,6 +1,6 @@
 # Platform Status
 
-Rune's compiler, core VM, simulator, and C ABI build on Windows, macOS, and Linux. Direct system-wide input backends are not present in the current branch.
+Spellwire's compiler, core VM, simulator, and C ABI build on Windows, macOS, and Linux. Direct system-wide input backends are not present in the current branch.
 
 ## Current matrix
 
@@ -8,13 +8,13 @@ Rune's compiler, core VM, simulator, and C ABI build on Windows, macOS, and Linu
 | --- | --- | --- | --- |
 | TypeScript compiler | Yes | Yes | Yes |
 | Native VM/core | Yes | Yes | Yes |
-| `rune-native` C ABI | Yes | Yes | Yes |
-| `rune-sim` | Yes | Yes | Yes |
+| `spellwire-native` C ABI | Yes | Yes | Yes |
+| `spellwire-sim` | Yes | Yes | Yes |
 | Global input observation | No | No | No |
 | Native input injection | No | No | No |
 | Native overlay renderer | No | No | No |
 
-`rune_capabilities()` currently returns only the `HostCallbackInjection` bit on every target.
+`spellwire_capabilities()` currently returns only the `HostCallbackInjection` bit on every target.
 
 ## Permissions for the current Quick Start
 
@@ -53,7 +53,7 @@ A direct backend should not be marked complete until it has:
 
 ## Linux security note
 
-Future evdev access exposes global keyboard input and is equivalent to keylogging capability. A shipped udev rule must be narrowly documented and appropriate for the deployment model. Do not install `packaging/linux/99-rune-input.rules` merely to use the current simulator.
+Future evdev access exposes global keyboard input and is equivalent to keylogging capability. A shipped udev rule must be narrowly documented and appropriate for the deployment model. Do not install `packaging/linux/99-spellwire-input.rules` merely to use the current simulator.
 
 ## Wayland and overlay
 

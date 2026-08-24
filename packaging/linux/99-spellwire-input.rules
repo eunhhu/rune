@@ -1,0 +1,4 @@
+# Spellwire's future direct evdev/uinput backend requires explicit device access.
+# Reading event devices exposes all keyboard input; review before installation.
+SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess"
+SUBSYSTEM=="misc", KERNEL=="uinput", TAG+="uaccess", OPTIONS+="static_node=uinput"

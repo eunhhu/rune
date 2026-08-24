@@ -9,7 +9,5 @@
 
 **/dist/
 *.tsbuildinfo
-*.rune.bin
-*.rune.bin.json
-node_modules/
-/packages/*/dist/
+*.spellwire.bin
+*.spellwire.bin.json
