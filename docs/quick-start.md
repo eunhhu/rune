@@ -99,12 +99,10 @@ Create `macro.spellwire.ts`:
 
 ```ts
 import {
-  InputSource,
   Key,
   MouseButton,
   clickMouse,
   keyDown,
-  keyHeld,
   keyUp,
   rt,
   sleepUs,
@@ -121,11 +119,9 @@ function tap(key: Key, count: number): void {
   }
 }
 
-rt.onKeyDown(
-  Key.Q,
+rt.hotkey(
+  "Q",
   () => {
-    if (!enabled || keyHeld(Key.LeftShift)) return;
-
     combo++;
     if (combo >= 3) {
       tap(Key.E, 2);
@@ -133,12 +129,12 @@ rt.onKeyDown(
       combo = 0;
     }
   },
-  { source: InputSource.Physical },
+  { repeat: false, when: () => enabled },
 );
 
-rt.onKeyDown(Key.F8, () => {
+rt.hotkey("F8", () => {
   enabled = !enabled;
-});
+}, { consume: false, repeat: false });
 ```
 
 Compile it:

@@ -13,6 +13,8 @@ rt.onKeyDown(...)
 rt.onKeyUp(...)
 rt.onMouseDown(...)
 rt.onMouseUp(...)
+rt.hotkey(...)
+rt.remap(...)
 ```
 
 Only code needed by those handlers is lowered to native bytecode. Other top-level TypeScript may coexist as control-plane code, but a handler cannot capture a dynamic value that the compiler cannot represent.
@@ -35,6 +37,21 @@ The state survives after the handler returns. The generated `.spellwire.bin.json
 Module-scope `const` declarations are folded as compile-time constants when possible.
 
 Spellwire numbers on the realtime plane are signed 64-bit integers. Numeric literals must be safe JavaScript integers at compile time. Booleans are represented as native integer truth values.
+
+## Trigger-level state gates
+
+Use `when` when the same boolean state must control both handler execution and original-input suppression:
+
+```ts
+let enabled = true;
+
+rt.hotkey("Q", () => tapKey(Key.E), { when: () => enabled });
+rt.remap("CapsLock", "Escape", { when: () => !enabled });
+```
+
+The gate is encoded as a native state slot. The runtime checks it before creating a continuation, and the worker republishes the atomic suppression table only when a referenced gate changes. `when` accepts one module-scope boolean state or its negation; richer expressions belong inside the handler and do not affect suppression.
+
+See [Hotkeys and automation](automation.md) for trigger options and platform behavior.
 
 ## Handler-local variables
 

@@ -62,8 +62,8 @@ bun packages/spellwire/src/cli.ts permissions
 
 ```text
 library: /.../target/release/libspellwire_native.dylib
-ABI: 3
-capabilities: 0x37
+ABI: 4
+capabilities: 0x77
 observe: granted
 inject: granted
 ```
@@ -82,7 +82,23 @@ bun run test:platform-loopback
 
 Intel Mac은 `x64`를 출력합니다. 정확한 `elapsedUs` 값은 환경마다 다르며 latency benchmark가 아닙니다. 이 scenario는 reload cleanup을 확인하기 위해 의도적으로 sleep과 polling을 포함합니다.
 
-### 3. OS submission benchmark
+### 3. 원본 입력 차단과 상태 gate 검증
+
+이 test의 tail-tap probe는 Xcode Command Line Tools를 사용합니다.
+
+```bash
+bun run test:consume-macos
+```
+
+정상 field:
+
+```json
+{"platform":"darwin","arch":"arm64","baselineTransitions":2,"inactiveTransitions":2,"nativeHandlerHits":1,"forwardedTransitions":0,"originalInput":"suppressed"}
+```
+
+`baselineTransitions: 2`는 probe가 자체 down/up을 볼 수 있음을 증명합니다. `inactiveTransitions: 2`는 false native `when` gate에서 입력이 통과함을 증명합니다. 마지막 0은 VM이 1회 실행되면서 active Spellwire tap이 두 transition을 제거했음을 뜻합니다.
+
+### 4. OS submission benchmark
 
 ```bash
 bun run bench:platform -- 10000
@@ -90,7 +106,7 @@ bun run bench:platform -- 10000
 
 p50, p95, p99, p999, max nanosecond를 출력합니다. macOS에서는 `CGEventPost` 제출 작업이 반환될 때까지의 시간입니다. 물리 switch-to-application latency로 발표하면 안 됩니다.
 
-### 4. Overlay smoke
+### 5. Overlay smoke
 
 ```bash
 target/release/spellwire-overlay --smoke
@@ -116,7 +132,7 @@ bun run build:native
 bun packages/spellwire/src/cli.ts permissions
 ```
 
-library는 `target\release\spellwire_native.dll`이어야 합니다. Windows는 low-level hook과 `SendInput`에 사전 permission prompt가 없으므로 현재 두 permission bit를 granted로 보고합니다.
+library는 `target\release\spellwire_native.dll`, ABI는 `4`, capabilities는 `0x77`이어야 합니다. Windows는 low-level hook과 `SendInput`에 사전 permission prompt가 없으므로 현재 두 permission bit를 granted로 보고합니다.
 
 이 값은 UIPI를 우회하지 않습니다. 일반 권한 Spellwire process는 관리자 권한 target에 입력을 주입할 수 없습니다. 먼저 일반 desktop application을 대상으로 검증하십시오. 관리자 target 검증이 필요하면 Spellwire를 같은 integrity level에서 실행하고 보고서에 명시하십시오. elevation을 일반 설치 요구 사항으로 취급하지 마십시오.
 
@@ -147,6 +163,8 @@ bun packages/spellwire/src/cli.ts permissions
 ```
 
 `observe: granted`는 읽을 수 있는 evdev device를 하나 이상 발견했다는 뜻입니다. `inject: granted`는 `/dev/uinput`을 열었다는 뜻입니다. Linux의 `permissions --request`는 rule을 설치하거나 prompt를 표시하지 않고 같은 resource를 다시 조회합니다.
+
+ABI는 `4`, capabilities는 `0x37`이어야 합니다. Linux 원본 입력 차단은 아직 구현되지 않았으므로 이 대상 장비 검증에서 `consume`이 source event를 숨길 것으로 기대하면 안 됩니다.
 
 ### 2. 제공 udev rule 검토 및 선택적 설치
 

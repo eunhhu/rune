@@ -8,14 +8,17 @@
 
 | 기능 | Windows | macOS | Linux |
 | --- | --- | --- | --- |
-| Observation | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` | listen-only `CGEventTap` | evdev + hotplug rescan |
+| Observation | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` | active `CGEventTap` | evdev + hotplug rescan |
 | Injection | tagged batched `SendInput` | private-source tagged `CGEventPost` | dedicated uinput device |
+| 원본 입력 차단 | hook이 nonzero 반환 | event tap이 null 반환 | 미구현 |
 | physical/synthetic 분류 | injection tag | injection tag | virtual-device identity |
 | keyboard/mouse/button/wheel | 지원 | 지원 | 지원 |
 | transparent retained overlay | winit/wgpu | accessory-policy winit/wgpu | winit/wgpu, compositor 의존 |
-| 실제 local 검증 | 대기 | arm64 통과 | 대기 |
+| 실제 local 검증 | 대기 | arm64 loopback + suppression 통과 | 대기 |
 
 Windows/Linux는 unit/mapping test와 macOS에서의 x86_64 cross-target Clippy를 통과했습니다. release artifact를 검증 완료로 취급하기 전에 대상 장비에서 [플랫폼 검증](platform-verification.ko.md)을 실행하십시오.
+
+Windows/macOS suppression은 lock-free trigger table과 paired down/repeat/up tracking을 사용합니다. Linux는 evdev event를 읽고 버리는 것만으로 특정 입력을 안전하게 차단할 수 없습니다. 각 물리 device를 exclusive grab하고 consume하지 않은 모든 capability를 virtual device로 relay해야 합니다. 전체 relay가 아직 없으므로 Linux는 `NativeInputSuppression`을 advertise하지 않으며 `consume`을 사용해도 원본 입력은 앱에 전달됩니다.
 
 ## 권한
 
@@ -45,11 +48,14 @@ bun install --frozen-lockfile
 bun run build:native
 bun packages/spellwire/src/cli.ts permissions
 bun run test:platform-loopback
+bun run test:consume-macos # macOS only
 bun run bench:platform -- 10000
 target/release/spellwire-overlay --smoke
 ```
 
 loopback은 tagged synthetic F20을 실제 platform injector로 보내고 global backend로 관찰한 뒤 synthetic-source VM handler가 named state를 갱신하는지 확인합니다.
+
+macOS consume smoke는 먼저 tail event tap이 차단되지 않은 transition 2개를 보는지 확인합니다. 이어서 상태 gate pass-through를 검증하고, gate 활성화 뒤에는 VM hit 1회와 forwarded transition 0개를 요구합니다.
 
 Windows overlay는 `target/release/spellwire-overlay.exe`입니다. Linux는 evdev/uinput 권한과 graphical session이 필요합니다. 오류 보고 전 [플랫폼 검증](platform-verification.ko.md)의 상세 절차를 따르십시오.
 

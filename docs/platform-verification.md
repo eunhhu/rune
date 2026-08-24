@@ -66,8 +66,8 @@ Expected shape:
 
 ```text
 library: /.../target/release/libspellwire_native.dylib
-ABI: 3
-capabilities: 0x37
+ABI: 4
+capabilities: 0x77
 observe: granted
 inject: granted
 ```
@@ -86,7 +86,23 @@ Expected JSON shape:
 
 Intel Macs report `x64`. The exact `elapsedUs` value varies and is not a latency benchmark: this scenario intentionally sleeps and polls while checking reload cleanup.
 
-### 3. Run the submission benchmark
+### 3. Verify original-input suppression and state gates
+
+Xcode Command Line Tools provide the tail-tap probe used by this test:
+
+```bash
+bun run test:consume-macos
+```
+
+Expected fields:
+
+```json
+{"platform":"darwin","arch":"arm64","baselineTransitions":2,"inactiveTransitions":2,"nativeHandlerHits":1,"forwardedTransitions":0,"originalInput":"suppressed"}
+```
+
+`baselineTransitions: 2` proves the probe can see its own down/up pair. `inactiveTransitions: 2` proves a false native `when` gate passes input through. The final zero proves the active Spellwire tap removed both transitions while the VM still ran once.
+
+### 4. Run the submission benchmark
 
 ```bash
 bun run bench:platform -- 10000
@@ -94,7 +110,7 @@ bun run bench:platform -- 10000
 
 The command reports p50, p95, p99, p999, and maximum nanoseconds for zero-delta mouse batches. It measures the return of `CGEventPost` submission work only. Do not present it as physical switch-to-application latency.
 
-### 4. Start the overlay smoke test
+### 5. Start the overlay smoke test
 
 ```bash
 target/release/spellwire-overlay --smoke
@@ -120,7 +136,7 @@ bun run build:native
 bun packages/spellwire/src/cli.ts permissions
 ```
 
-Expected library suffix is `target\release\spellwire_native.dll`. Windows currently reports both permission bits as granted because low-level hooks and `SendInput` have no preflight prompt.
+Expected library suffix is `target\release\spellwire_native.dll`, ABI is `4`, and capabilities are `0x77`. Windows currently reports both permission bits as granted because low-level hooks and `SendInput` have no preflight prompt.
 
 That status does not bypass User Interface Privilege Isolation. A normal Spellwire process cannot inject into an administrator-elevated target. Verify first against a normal desktop application. If elevated-target testing is required, run Spellwire at the same integrity level and record that fact; never treat elevation as a general installation requirement.
 
@@ -153,6 +169,8 @@ bun packages/spellwire/src/cli.ts permissions
 ```
 
 `observe: granted` means at least one readable evdev device was discovered. `inject: granted` means `/dev/uinput` opened successfully. `permissions --request` does not install rules or display a prompt on Linux; it only rechecks the same resources.
+
+ABI should be `4` and capabilities should be `0x37`. Linux original-input suppression is not implemented; do not expect `consume` to hide the source event in this target-machine run.
 
 ### 2. Review and optionally install the supplied udev rule
 

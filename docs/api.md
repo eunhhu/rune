@@ -9,12 +9,14 @@ This page documents the API that exists in the current source tree. It deliberat
 ```ts
 import {
   InputSource,
+  NativeCapability,
   NativeHost,
   NativeOverlayRenderer,
   Overlay,
   OverlayScene,
   Spellwire,
   Key,
+  Modifier,
   MouseButton,
   clickMouse,
   keyDown,
@@ -24,6 +26,7 @@ import {
   mouseHeld,
   mouseUp,
   moveMouse,
+  parseHotkey,
   rt,
   sleepUs,
   tapKey,
@@ -48,6 +51,38 @@ All three default to `src/main.spellwire.ts` when input is omitted. `run` and `w
 
 ## Realtime registration
 
+### `rt.hotkey(chord, handler, options?)`
+
+Registers a portable modifier chord or mouse chord. It consumes original input and requires exact modifiers by default.
+
+```ts
+let enabled = true;
+
+rt.hotkey("Ctrl+Shift+K", () => {
+  tapKey(Key.Enter);
+}, {
+  source: InputSource.Physical,
+  consume: true,
+  exactModifiers: true,
+  repeat: false,
+  edge: "down",
+  when: () => enabled,
+});
+```
+
+`edge` is `"down"` or `"up"`. `when` must return one module-scope boolean native state or its negation. The gate controls both VM dispatch and original-input suppression. `parseHotkey(chord)` exposes the same parser for validation/tooling and returns `{ device, code, modifiers }`; logical modifier bits are exported as `Modifier`.
+
+### `rt.remap(from, to, options?)`
+
+Compiles paired key down/up handlers and consumes the accepted source sequence:
+
+```ts
+rt.remap("CapsLock", "Escape", { when: () => enabled });
+rt.remap(Key.CapsLock, Key.Escape, { repeat: false });
+```
+
+Both keys may be a single portable string name or `Key` value. Options are `source`, `repeat`, and `when`.
+
 ### `rt.onKeyDown(key, handler, options?)`
 ### `rt.onKeyUp(key, handler, options?)`
 ### `rt.onMouseDown(button, handler, options?)`
@@ -65,14 +100,18 @@ rt.onKeyDown(
 );
 ```
 
-`options.source` accepts:
+Low-level options are:
 
-- `InputSource.Physical` — default;
-- `InputSource.Synthetic`;
-- `InputSource.Any`.
+- `source`: `InputSource.Physical` (default), `Synthetic`, or `Any`;
+- `consume`: original-input suppression, default `false` for low-level registrations;
+- `modifiers`: `Modifier` bitmask;
+- `exactModifiers`: reject extra modifiers, default `false`;
+- `repeat`: accept repeat downs, default `true`;
+- `when`: module-scope native boolean state gate.
 
-The compiler resolves key/button arguments and source options as constants.
-The options object may be empty or contain one explicit, quoted, computed-string, or shorthand `source` property. Spreads and unknown properties fail compilation instead of defaulting silently.
+The compiler resolves trigger arguments and options statically. Properties may use identifiers, quoted names, computed string names, or shorthand constant values. Spreads, duplicate properties, dynamic values, and unknown options fail compilation instead of defaulting silently.
+
+See [Hotkeys, remaps, and state-driven automation](automation.md) for grammar, suppression behavior, overlay state flow, and the AutoHotkey migration matrix.
 
 ## Realtime output intrinsics
 
@@ -255,6 +294,8 @@ host.close();
 ```
 
 The host resolves a packaged platform library, `SPELLWIRE_NATIVE_LIBRARY`, or workspace release/debug build. `close()` is idempotent. Stopping releases tracked synthetic held inputs.
+
+`host.capabilities & NativeCapability.NativeInputSuppression` is nonzero on Windows/macOS and zero on the current Linux backend.
 
 | Member | Contract |
 | --- | --- |

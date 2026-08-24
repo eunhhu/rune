@@ -4,6 +4,8 @@
 
 Spellwire의 modern overlay API는 native state, Figma식 auto layout, retained diff, 안전한 lifecycle 관리를 하나로 합칩니다. 절대 좌표 계산이나 수동 `scene.update()` / `renderer.apply()` loop가 필요 없습니다.
 
+대응하는 realtime hotkey source와 input → native state → overlay 전체 update 경로는 [Hotkey와 상태 기반 자동화](automation.ko.md#하나의-상태로-input과-overlay-함께-구동)를 참고하십시오.
+
 ## 상태 + 오버레이 전체 코드
 
 ```ts

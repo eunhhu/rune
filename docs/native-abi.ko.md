@@ -30,9 +30,12 @@ uint32_t spellwire_request_permissions(void);
 1 << 3  NativeOverlay       (reserved; renderer는 companion process)
 1 << 4  HostLifecycle
 1 << 5  NonBlockingDelay
+1 << 6  NativeInputSuppression
 ```
 
-현재 library는 `NativeOverlay`를 제외한 `0x37`을 반환합니다. permission bit는 `1 << 0` observe, `1 << 1` inject입니다.
+Windows와 macOS는 `NativeOverlay`를 제외한 `0x77`을 반환합니다. Linux evdev backend에는 아직 원본 입력 차단용 exclusive pass-through relay가 없어 `0x37`을 반환합니다. permission bit는 `1 << 0` observe, `1 << 1` inject입니다.
+
+ABI version `4`와 bytecode wire version `3`은 독립적입니다. wire v3 handler record에는 modifier/repeat/consume policy와 optional native state gate가 들어갑니다.
 
 ## Owned platform host
 
@@ -64,7 +67,7 @@ int32_t spellwire_host_state_snapshot(
 size_t spellwire_host_last_error(const SpellwireHost *host, char *buffer, size_t capacity);
 ```
 
-`start`는 OS injector/observer와 runtime worker 하나를 만듭니다. observer는 bounded channel에 publish하고 delayed handler는 fixed-capacity deadline scheduler로 yield합니다. `stop`은 observation과 pending continuation을 종료하고 host가 추적하는 synthetic key/button down을 해제합니다. `free`도 running host를 stop합니다.
+`start`는 OS injector/observer와 runtime worker 하나를 만듭니다. observer는 미리 할당한 fixed-capacity SPSC queue에 publish하고 delayed handler는 fixed-capacity deadline scheduler로 yield합니다. `stop`은 observation과 pending continuation을 종료하고 host가 추적하는 synthetic key/button down을 해제합니다. `free`도 running host를 stop합니다.
 
 reload는 synchronous입니다. low-level flag는 공통 slot을 positional하게 복사합니다. Bun wrapper는 false를 전달하고 manifest name/kind로 compatible value를 보존해 state 순서 변경에 의한 corruption을 막습니다.
 

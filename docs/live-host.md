@@ -69,7 +69,7 @@ Normal `run`/`watch` commands prepare permissions automatically. For platform di
 bun packages/spellwire/src/cli.ts permissions
 ```
 
-A fully ready host prints `observe: granted` and `inject: granted`. ABI `4` and capabilities `0x37` are expected for this source tree. Platform-specific caveats still apply: Windows UIPI is target-specific, macOS has two privacy grants, and Linux requires device-file access.
+A fully ready host prints `observe: granted` and `inject: granted`. ABI `4` is expected. Windows/macOS report capabilities `0x77`; Linux reports `0x37` because original-input suppression is pending there. Platform-specific caveats still apply: Windows UIPI is target-specific, macOS has two privacy grants, and Linux requires device-file access.
 
 ## Three CLI workflows
 

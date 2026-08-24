@@ -13,10 +13,10 @@ Spellwire separates unrestricted Bun control-plane work from bounded native even
 SPWR bytecode + named-state manifest
     │ Bun FFI load/reload
     ▼
-platform observer → bounded channel → runtime worker → platform injector
-                                          │
-                                          ├─ fixed continuation deadlines
-                                          └─ optional SharedArrayBuffer event ring → Bun
+platform observer → atomic consume policy → fixed SPSC queue → runtime worker → platform injector
+                                                               │
+                                                               ├─ fixed continuation deadlines
+                                                               └─ optional SharedArrayBuffer event ring → Bun
 
 Bun OverlayScene mutations → pipe → separate native retained renderer
 ```
@@ -25,10 +25,10 @@ Bun OverlayScene mutations → pipe → separate native retained renderer
 
 The public package supplies USB HID-style keys, realtime registration markers, output/held intrinsics, fallback test helpers, the embedded compiler, `NativeHost`, `DynamicInputLane`, named state wrappers, and the overlay client.
 
-The compiler parses source without executing it, finds top-level `rt.on*` registrations, resolves representable state/constants/helpers, validates the bounded subset, and emits:
+The compiler parses source without executing it, finds top-level `rt.hotkey`, `rt.remap`, and `rt.on*` registrations, resolves representable state/constants/helpers, validates the bounded subset, and emits:
 
 - initial persistent integer state;
-- source/device/edge/code triggers;
+- source/device/edge/code triggers with logical modifiers, repeat/consume flags, and optional boolean state gates;
 - fixed-width integer instructions;
 - stack/local/instruction limits.
 
@@ -47,10 +47,12 @@ The lower-level compatibility engine retains synchronous delay behavior for simp
 `spellwire-native` implements one lifecycle above three backends:
 
 - Windows: low-level keyboard/mouse hook message loop and tagged `SendInput`;
-- macOS: listen-only CoreGraphics event tap and tagged `CGEventPost` from a private source;
+- macOS: active CoreGraphics event tap with suppression and tagged `CGEventPost` from a private source;
 - Linux: nonblocking evdev polling/hotplug discovery and a dedicated uinput device.
 
-Observation callbacks perform bounded translation and `try_send`; the worker owns all VM state, deadlines, reloads, state commands, and injection. Stopping the host joins observer/worker threads and releases tracked held synthetic inputs.
+Windows/macOS observation callbacks perform bounded translation, source-aware held tracking, one atomic suppression lookup, and one fixed-capacity SPSC publish. The SPSC queue uses preallocated slots, acquire/release counters, and a worker wake token; it does not call the standard mutex-backed wake path. The callback contains no JavaScript, allocation, mutex, IPC, or overlay work. The worker owns VM state, deadlines, reloads, state commands, consume-table publication, and injection. Gate values are checked in both VM dispatch and the published suppression table. Linux uses the same queue but remains observe/inject-only until an exclusive evdev relay can preserve every grabbed device capability safely.
+
+Stopping the host joins observer/worker threads and releases tracked held synthetic inputs. Consumed down transitions track their paired repeats/up transitions so target applications do not receive unmatched sequences.
 
 ## Dynamic JavaScript lane
 

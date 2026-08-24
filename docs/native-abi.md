@@ -32,9 +32,12 @@ Capability bits are:
 1 << 3  NativeOverlay       (reserved; renderer is a companion process)
 1 << 4  HostLifecycle
 1 << 5  NonBlockingDelay
+1 << 6  NativeInputSuppression
 ```
 
-The current library returns `0x37`: every bit above except `NativeOverlay`. Permission bits are `1 << 0` observe and `1 << 1` inject.
+Windows and macOS return `0x77`: every bit above except `NativeOverlay`. Linux returns `0x37` because its evdev backend does not yet provide an exclusive pass-through relay for original-input suppression. Permission bits are `1 << 0` observe and `1 << 1` inject.
+
+ABI version `4` and bytecode wire version `3` are independent. Wire v3 handler records include modifier/repeat/consume policy and an optional native state gate.
 
 ## Owned platform host
 
@@ -68,7 +71,7 @@ int32_t spellwire_host_state_snapshot(
 size_t spellwire_host_last_error(const SpellwireHost *host, char *buffer, size_t capacity);
 ```
 
-`start` creates the OS injector/observer and one runtime worker. Observers publish into a bounded channel; delayed handlers yield into a fixed-capacity deadline scheduler. `stop` shuts down observation, clears pending continuations, and releases synthetic key/button downs tracked by the host. `free` also stops a running host.
+`start` creates the OS injector/observer and one runtime worker. Observers publish into a preallocated fixed-capacity SPSC queue; delayed handlers yield into a fixed-capacity deadline scheduler. `stop` shuts down observation, clears pending continuations, and releases synthetic key/button downs tracked by the host. `free` also stops a running host.
 
 Reload is synchronous. The low-level flag copies common state slots positionally. The Bun wrapper passes false and preserves compatible values by manifest name and kind, preventing state reordering from corrupting values.
 

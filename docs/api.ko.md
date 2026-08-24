@@ -9,12 +9,14 @@
 ```ts
 import {
   InputSource,
+  NativeCapability,
   NativeHost,
   NativeOverlayRenderer,
   Overlay,
   OverlayScene,
   Spellwire,
   Key,
+  Modifier,
   MouseButton,
   clickMouse,
   keyDown,
@@ -24,6 +26,7 @@ import {
   mouseHeld,
   mouseUp,
   moveMouse,
+  parseHotkey,
   rt,
   sleepUs,
   tapKey,
@@ -48,6 +51,40 @@ bunx spellwire compile macro.spellwire.ts [output.spellwire.bin]
 
 ## 실시간 handler 등록
 
+### `rt.hotkey(chord, handler, options?)`
+
+portable modifier chord 또는 mouse chord를 등록합니다. 기본적으로 원본 입력을 consume하고 exact modifier를 요구합니다.
+
+```ts
+let enabled = true;
+
+rt.hotkey("Ctrl+Shift+K", () => {
+  tapKey(Key.Enter);
+}, {
+  source: InputSource.Physical,
+  consume: true,
+  exactModifiers: true,
+  repeat: false,
+  edge: "down",
+  when: () => enabled,
+});
+```
+
+`edge`는 `"down"` 또는 `"up"`입니다. `when`은 module-scope boolean native state 하나 또는 그 부정을 반환해야 합니다. gate가 VM dispatch와 원본 입력 차단을 함께 제어합니다. `parseHotkey(chord)`는 validation/tooling에서 같은 parser를 사용할 수 있게 `{ device, code, modifiers }`를 반환합니다. logical modifier bit는 `Modifier`로 export합니다.
+
+### `rt.remap(from, to, options?)`
+
+key down/up handler를 한 쌍으로 compile하고 활성 source sequence를 consume합니다.
+
+```ts
+rt.remap("CapsLock", "Escape", { when: () => enabled });
+rt.remap(Key.CapsLock, Key.Escape, { repeat: false });
+```
+
+두 key는 portable 문자열 이름 하나 또는 `Key` 값입니다. option은 `source`, `repeat`, `when`입니다.
+
+### Low-level 등록
+
 ```ts
 rt.onKeyDown(key, handler, options?)
 rt.onKeyUp(key, handler, options?)
@@ -67,7 +104,18 @@ rt.onKeyDown(
 );
 ```
 
-`options.source`는 `InputSource.Physical`(기본), `InputSource.Synthetic`, `InputSource.Any`를 받습니다. compiler는 key/button과 source option을 constant로 해석합니다. option object는 비어 있거나 하나의 `source` property만 가질 수 있습니다. spread와 알 수 없는 property는 compile error가 됩니다.
+Low-level option:
+
+- `source`: `InputSource.Physical`(기본), `Synthetic`, `Any`
+- `consume`: 원본 입력 차단, low-level 기본값 `false`
+- `modifiers`: `Modifier` bitmask
+- `exactModifiers`: 추가 modifier 거부, 기본값 `false`
+- `repeat`: repeat down 허용, 기본값 `true`
+- `when`: module-scope native boolean state gate
+
+compiler는 trigger와 option을 정적으로 해석합니다. identifier, quoted name, computed string name, shorthand constant를 지원합니다. spread, 중복 property, dynamic value, 알 수 없는 option은 compile error입니다.
+
+문법, suppression 동작, overlay state 흐름, AutoHotkey 마이그레이션 표는 [Hotkey, remap, 상태 기반 자동화](automation.ko.md)를 참고하십시오.
 
 ## 출력 및 held intrinsic
 
@@ -207,6 +255,8 @@ host.close();
 | `close()` | 필요 시 stop, native host free, library close |
 
 host는 package library, `SPELLWIRE_NATIVE_LIBRARY`, workspace release/debug build 순서로 탐색합니다. `close()`는 idempotent이고 stop은 추적 중인 synthetic held input을 해제합니다. 자세한 예제는 [라이브 네이티브 호스트](live-host.ko.md)를 참고하십시오.
+
+`host.capabilities & NativeCapability.NativeInputSuppression`은 Windows/macOS에서 nonzero이고 현재 Linux backend에서는 0입니다.
 
 ## 통합 application lifecycle
 

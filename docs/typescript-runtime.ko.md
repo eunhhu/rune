@@ -13,6 +13,8 @@ rt.onKeyDown(Key.Q, () => {})
 rt.onKeyUp(Key.Q, () => {})
 rt.onMouseDown(MouseButton.Left, () => {})
 rt.onMouseUp(MouseButton.Left, () => {})
+rt.hotkey("Ctrl+K", () => {})
+rt.remap("CapsLock", "Escape")
 ```
 
 handler에 필요한 code만 native bytecode로 lowering합니다. 다른 top-level TypeScript는 control-plane code로 함께 존재할 수 있지만 handler가 compiler가 표현할 수 없는 dynamic value를 capture할 수는 없습니다.
@@ -32,6 +34,21 @@ rt.onKeyDown(Key.Q, () => {
 ```
 
 값은 dispatch 사이에 유지됩니다. manifest는 source name과 native slot/kind mapping을 기록합니다. live reload는 이름과 kind가 같은 state를 보존하므로 선언 순서 변경이 값을 뒤섞지 않습니다. module-scope `const`는 가능하면 compile-time constant로 fold됩니다.
+
+## Trigger-level 상태 gate
+
+같은 boolean state가 handler 실행과 원본 입력 차단을 함께 제어해야 한다면 `when`을 사용합니다.
+
+```ts
+let enabled = true;
+
+rt.hotkey("Q", () => tapKey(Key.E), { when: () => enabled });
+rt.remap("CapsLock", "Escape", { when: () => !enabled });
+```
+
+gate는 native state slot으로 encode됩니다. runtime은 continuation을 만들기 전에 gate를 확인하고, worker는 참조 gate가 바뀔 때만 atomic suppression table을 다시 publish합니다. `when`은 module-scope boolean state 하나 또는 그 부정만 받습니다. 더 복잡한 식은 handler 내부에 작성하며 suppression에는 영향을 주지 않습니다.
+
+trigger option과 플랫폼별 동작은 [Hotkey와 자동화](automation.ko.md)를 참고하십시오.
 
 ## 값과 local
 

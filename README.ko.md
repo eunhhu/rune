@@ -4,7 +4,7 @@
 
 Spellwire는 Bun과 TypeScript를 사용하는 상태 기반 실시간 입력 자동화 런타임입니다. 분석 가능한 입력 핸들러를 입력 이벤트마다 JavaScript로 호출하지 않고, 미리 제한된 네이티브 바이트코드로 컴파일하여 실행합니다.
 
-> 초기 알파 버전입니다. TypeScript AOT 컴파일러, 제한형 네이티브 VM, 비차단 지연 스케줄러, Bun FFI 호스트, Windows/macOS/Linux 입력 백엔드, 공유 동적 입력 lane, retained-mode 네이티브 오버레이가 구현되어 있습니다. macOS는 실제 루프백 검증을 마쳤고 Windows와 Linux는 대상 컴파일 및 단위 테스트를 통과했지만 실제 장비 smoke test가 남아 있습니다.
+> 초기 알파 버전입니다. TypeScript AOT 컴파일러, 제한형 네이티브 VM, lock-free 입력 차단 hotkey/remap, 상태 gate, 비차단 지연 스케줄러, Bun FFI 호스트, Windows/macOS/Linux 입력 백엔드, 공유 동적 입력 lane, retained-mode 네이티브 오버레이가 구현되어 있습니다. macOS는 실제 루프백과 입력 차단 검증을 마쳤고 Windows와 Linux는 실제 장비 검증이 남아 있습니다.
 
 ## 가장 빠르게 시작하기
 
@@ -35,48 +35,27 @@ bun add spellwire
 ## 상태 기반 실시간 TypeScript
 
 ```ts
-import {
-  InputSource,
-  Key,
-  MouseButton,
-  clickMouse,
-  keyHeld,
-  rt,
-  sleepUs,
-  tapKey,
-} from "spellwire";
+import { Key, rt, tapKey } from "spellwire";
 
-let phase = 0;
 let enabled = true;
+let presses = 0;
 
-function tapRepeated(key: Key, count: number): void {
-  for (let index = 0; index < count; index++) {
-    tapKey(key);
-  }
-}
-
-rt.onKeyDown(
-  Key.Q,
-  () => {
-    if (!enabled || keyHeld(Key.LeftShift)) return;
-
-    phase = (phase + 1) % 3;
-    tapRepeated(Key.E, phase + 1);
-
-    if (phase === 2) {
-      clickMouse(MouseButton.Left);
-      sleepUs(80);
-    }
-  },
-  { source: InputSource.Physical },
-);
-
-rt.onKeyDown(Key.F8, () => {
-  enabled = !enabled;
+rt.hotkey("Ctrl+Shift+K", () => {
+  presses += 1;
+  tapKey(Key.Enter);
+}, {
+  repeat: false,
+  when: () => enabled,
 });
+
+rt.hotkey("F8", () => {
+  enabled = !enabled;
+}, { consume: false });
+
+rt.remap("CapsLock", "Escape", { when: () => enabled });
 ```
 
-실시간 핸들러가 참조하는 모듈 범위 정수/불리언 `let` 선언은 영속 네이티브 상태가 됩니다. 조건문, 제한된 반복문, 산술 연산, helper 함수, held-input 조회, 지연, 키/마우스 출력 intrinsic은 사전에 컴파일됩니다. 실시간 핸들러 밖의 일반 Bun 코드는 제한 없는 control plane으로 남습니다.
+portable 문자열이 modifier 보일러플레이트를 없애고, `when`이 action과 원본 입력 통과를 함께 gate하며, remap은 down/up 전환을 자동으로 한 쌍 생성합니다. 실시간 핸들러가 참조하는 모듈 범위 정수/불리언 `let` 선언은 영속 네이티브 상태가 됩니다. 더 큰 상태 머신에는 조건, 반복, 산술, helper, held 조회, delay, low-level `rt.onKey*`/`rt.onMouse*`도 그대로 사용할 수 있습니다. 실시간 핸들러 밖의 일반 Bun 코드는 제한 없는 control plane입니다.
 
 ## 빌드
 
@@ -123,6 +102,7 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 | TypeScript AOT 컴파일러 | 구현 완료 |
 | 영속 정수/불리언 상태 | 구현 완료 |
 | 조건, 반복, 대입, held 조회, helper 함수 | 구현 완료 |
+| portable consuming hotkey, release trigger, 상태 gate, remap | Windows/macOS 구현, Linux suppression 미구현 |
 | 네이티브 VM, 버전 wire format, 고정 출력 batch | 구현 완료 |
 | 네이티브 inspector/simulator | 구현 완료 |
 | 명시적 dispatch 및 owned-host C ABI | 구현 완료 |
@@ -151,6 +131,7 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 - [라이브 네이티브 호스트](docs/live-host.ko.md)
 - [플랫폼 검증](docs/platform-verification.ko.md)
 - [API 레퍼런스](docs/api.ko.md)
+- [Hotkey, remap, 상태 gate, AutoHotkey 마이그레이션](docs/automation.ko.md)
 - [실시간 TypeScript](docs/typescript-runtime.ko.md)
 - [아키텍처](docs/architecture.ko.md)
 - [네이티브 C ABI](docs/native-abi.ko.md)

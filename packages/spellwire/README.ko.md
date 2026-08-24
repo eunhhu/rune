@@ -12,11 +12,14 @@ bun add spellwire
 import { Key, rt, tapKey } from "spellwire";
 
 let count = 0;
+let enabled = true;
 
-rt.onKeyDown(Key.Q, () => {
+rt.hotkey("Ctrl+Q", () => {
   count += 1;
   if (count % 2 === 0) tapKey(Key.E);
-});
+}, { repeat: false, when: () => enabled });
+
+rt.remap("CapsLock", "Escape", { when: () => enabled });
 ```
 
 CLI는 세 가지 일반 작업만 제공합니다.
@@ -50,4 +53,5 @@ await app.untilSignal();
 - [라이브 네이티브 호스트](https://github.com/eunhhu/spellwire/blob/main/docs/live-host.ko.md)
 - [플랫폼 검증](https://github.com/eunhhu/spellwire/blob/main/docs/platform-verification.ko.md)
 - [API 레퍼런스](https://github.com/eunhhu/spellwire/blob/main/docs/api.ko.md)
+- [Hotkey와 AutoHotkey 마이그레이션](https://github.com/eunhhu/spellwire/blob/main/docs/automation.ko.md)
 - [상태 기반 오버레이](https://github.com/eunhhu/spellwire/blob/main/docs/overlay.ko.md)

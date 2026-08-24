@@ -63,7 +63,7 @@ Linux:   target/release/libspellwire_native.so
 bun packages/spellwire/src/cli.ts permissions
 ```
 
-현재 소스에서는 ABI `4`, capabilities `0x37`, `observe: granted`, `inject: granted`가 정상입니다. Windows UIPI는 대상 process에 따라 달라지고, macOS는 두 privacy grant가 필요하며, Linux는 device file 접근 권한이 필요합니다.
+현재 소스에서는 ABI `4`, `observe: granted`, `inject: granted`가 정상입니다. Windows/macOS capabilities는 `0x77`, 원본 입력 차단이 아직 없는 Linux는 `0x37`입니다. Windows UIPI는 대상 process에 따라 달라지고, macOS는 두 privacy grant가 필요하며, Linux는 device file 접근 권한이 필요합니다.
 
 ## CLI의 세 workflow
 

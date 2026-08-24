@@ -12,11 +12,14 @@ bun add spellwire
 import { Key, rt, tapKey } from "spellwire";
 
 let count = 0;
+let enabled = true;
 
-rt.onKeyDown(Key.Q, () => {
+rt.hotkey("Ctrl+Q", () => {
   count += 1;
   if (count % 2 === 0) tapKey(Key.E);
-});
+}, { repeat: false, when: () => enabled });
+
+rt.remap("CapsLock", "Escape", { when: () => enabled });
 ```
 
 Run, watch, or compile the script:
@@ -27,7 +30,7 @@ bunx spellwire watch macro.spellwire.ts
 bunx spellwire compile macro.spellwire.ts
 ```
 
-The package includes the SDK, AOT compiler, CLI, Bun FFI native host, named state/hot reload, shared dynamic lane, and retained native overlay client. Release tarballs are assembled with platform-native runtime and overlay artifacts by the publish workflow.
+The package includes the SDK, AOT compiler, CLI, lock-free consuming hotkeys/remaps on Windows/macOS, native state gates, Bun FFI native host, named state/hot reload, shared dynamic lane, and retained native overlay client. Release tarballs are assembled with platform-native runtime and overlay artifacts by the publish workflow.
 
 State and overlay can share one lifecycle without update boilerplate:
 
@@ -52,4 +55,5 @@ Detailed guides:
 - [Live Native Host Guide](https://github.com/eunhhu/spellwire/blob/main/docs/live-host.md)
 - [Platform Verification Guide](https://github.com/eunhhu/spellwire/blob/main/docs/platform-verification.md)
 - [API Reference](https://github.com/eunhhu/spellwire/blob/main/docs/api.md)
+- [Hotkeys and AutoHotkey migration](https://github.com/eunhhu/spellwire/blob/main/docs/automation.md)
 - [State-driven Overlay](https://github.com/eunhhu/spellwire/blob/main/docs/overlay.md)

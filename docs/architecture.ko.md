@@ -13,10 +13,10 @@ Spellwire는 제한 없는 Bun control plane과 제한된 native event execution
 SPWR bytecode + named-state manifest
     │ Bun FFI load/reload
     ▼
-platform observer → bounded channel → runtime worker → platform injector
-                                          │
-                                          ├─ fixed continuation deadlines
-                                          └─ optional SharedArrayBuffer event ring → Bun
+platform observer → atomic consume policy → fixed SPSC queue → runtime worker → platform injector
+                                                               │
+                                                               ├─ fixed continuation deadlines
+                                                               └─ optional SharedArrayBuffer event ring → Bun
 
 Bun OverlayScene mutations → pipe → separate native retained renderer
 ```
@@ -25,10 +25,10 @@ Bun OverlayScene mutations → pipe → separate native retained renderer
 
 공개 package는 USB HID key, realtime registration marker, output/held intrinsic, fallback test helper, compiler, `NativeHost`, `DynamicInputLane`, named state wrapper, overlay client를 제공합니다.
 
-compiler는 source를 실행하지 않고 parse하며 top-level `rt.on*` registration을 찾습니다. 표현 가능한 state/constant/helper를 해석하고 제한 subset을 검증한 뒤 다음을 생성합니다.
+compiler는 source를 실행하지 않고 parse하며 top-level `rt.hotkey`, `rt.remap`, `rt.on*` registration을 찾습니다. 표현 가능한 state/constant/helper를 해석하고 제한 subset을 검증한 뒤 다음을 생성합니다.
 
 - 초기 persistent integer state
-- source/device/edge/code trigger
+- logical modifier, repeat/consume flag, optional boolean state gate를 포함한 source/device/edge/code trigger
 - fixed-width integer instruction
 - stack/local/instruction limit
 
@@ -47,10 +47,12 @@ runtime은 direct source × device × edge × code trigger table, fixed held-inp
 `spellwire-native`는 하나의 lifecycle 위에 세 backend를 구현합니다.
 
 - Windows: low-level keyboard/mouse hook message loop, tagged `SendInput`
-- macOS: listen-only CoreGraphics event tap, private source의 tagged `CGEventPost`
+- macOS: suppression 가능한 active CoreGraphics event tap, private source의 tagged `CGEventPost`
 - Linux: nonblocking evdev poll/hotplug discovery, dedicated uinput device
 
-observation callback은 제한된 translation과 `try_send`만 수행합니다. worker가 VM state, deadline, reload, state command, injection을 독점합니다. stop은 observer/worker thread를 join하고 추적 중인 synthetic held input을 해제합니다.
+Windows/macOS observation callback은 제한된 translation, source-aware held tracking, atomic suppression lookup 1회, 고정 용량 SPSC publish 1회만 수행합니다. SPSC queue는 미리 할당한 slot, acquire/release counter, worker wake token을 사용하며 표준 channel의 mutex 기반 wake 경로를 호출하지 않습니다. callback에는 JavaScript, allocation, mutex, IPC, overlay 작업이 없습니다. worker가 VM state, deadline, reload, state command, consume-table publish, injection을 독점합니다. gate 값은 VM dispatch와 publish된 suppression table 양쪽에서 확인합니다. Linux도 같은 queue를 사용하지만 grab한 모든 device capability를 안전하게 보존하는 exclusive evdev relay가 구현될 때까지 observe/inject-only입니다.
+
+stop은 observer/worker thread를 join하고 추적 중인 synthetic held input을 해제합니다. consume한 down은 paired repeat/up을 추적하여 대상 앱에 불완전한 sequence가 전달되지 않게 합니다.
 
 ## Dynamic JavaScript lane
 

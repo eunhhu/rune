@@ -4,7 +4,7 @@
 
 Spellwire is a stateful realtime input-automation runtime for Bun and TypeScript. Analyzable input handlers are compiled ahead of time into bounded native bytecode instead of invoking JavaScript for every input event.
 
-> Early alpha. The TypeScript AOT compiler, bounded native VM, non-blocking delay scheduler, Bun FFI host, global platform backends, shared dynamic lane, and retained native overlay are implemented. macOS has live loopback verification; Windows and Linux currently have compile/unit coverage and still need target-machine smoke runs.
+> Early alpha. The TypeScript AOT compiler, bounded native VM, lock-free consuming hotkeys/remaps, state gates, non-blocking delay scheduler, Bun FFI host, global platform backends, shared dynamic lane, and retained native overlay are implemented. macOS has live loopback and suppression verification; Windows and Linux still need target-machine runs.
 
 ## Install
 
@@ -39,48 +39,27 @@ Generated projects also include a state-driven modern overlay in `src/app.ts`. I
 ## Stateful realtime TypeScript
 
 ```ts
-import {
-  InputSource,
-  Key,
-  MouseButton,
-  clickMouse,
-  keyHeld,
-  rt,
-  sleepUs,
-  tapKey,
-} from "spellwire";
+import { Key, rt, tapKey } from "spellwire";
 
-let phase = 0;
 let enabled = true;
+let presses = 0;
 
-function tapRepeated(key: Key, count: number): void {
-  for (let index = 0; index < count; index++) {
-    tapKey(key);
-  }
-}
-
-rt.onKeyDown(
-  Key.Q,
-  () => {
-    if (!enabled || keyHeld(Key.LeftShift)) return;
-
-    phase = (phase + 1) % 3;
-    tapRepeated(Key.E, phase + 1);
-
-    if (phase === 2) {
-      clickMouse(MouseButton.Left);
-      sleepUs(80);
-    }
-  },
-  { source: InputSource.Physical },
-);
-
-rt.onKeyDown(Key.F8, () => {
-  enabled = !enabled;
+rt.hotkey("Ctrl+Shift+K", () => {
+  presses += 1;
+  tapKey(Key.Enter);
+}, {
+  repeat: false,
+  when: () => enabled,
 });
+
+rt.hotkey("F8", () => {
+  enabled = !enabled;
+}, { consume: false });
+
+rt.remap("CapsLock", "Escape", { when: () => enabled });
 ```
 
-Module-scope integer and boolean `let` declarations referenced by realtime handlers become persistent native state. Conditions, loops, arithmetic, helper functions, held-input queries, delays, and output intrinsics compile ahead of time. Ordinary Bun code outside realtime handlers remains unrestricted control-plane TypeScript.
+Portable strings replace modifier boilerplate, `when` gates action and pass-through together, and remaps emit paired down/up transitions automatically. Module-scope integer and boolean `let` declarations referenced by realtime handlers become persistent native state. Conditions, loops, arithmetic, helper functions, held-input queries, delays, and low-level `rt.onKey*`/`rt.onMouse*` registrations remain available when a larger state machine needs them. Ordinary Bun code outside realtime handlers remains unrestricted control-plane TypeScript.
 
 ## Build
 
@@ -129,6 +108,7 @@ If this is your first live run, follow [Live Native Host Guide](docs/live-host.m
 | TypeScript AOT compiler | Implemented |
 | Persistent integer/boolean state | Implemented |
 | Conditions, loops, assignments, held checks, helper functions | Implemented |
+| Portable consuming hotkeys, release triggers, state gates, and remaps | Windows/macOS implemented; Linux suppression pending |
 | Native VM, versioned wire format, and fixed output batches | Implemented |
 | Native inspector/simulator | Implemented |
 | C ABI with explicit and owned-host lifecycle APIs | Implemented |
@@ -157,6 +137,7 @@ If this is your first live run, follow [Live Native Host Guide](docs/live-host.m
 - [Live Native Host Guide](docs/live-host.md)
 - [Platform Verification Guide](docs/platform-verification.md)
 - [API reference](docs/api.md)
+- [Hotkeys, remaps, state gates, and AutoHotkey migration](docs/automation.md)
 - [Realtime TypeScript](docs/typescript-runtime.md)
 - [Architecture](docs/architecture.md)
 - [Native C ABI](docs/native-abi.md)

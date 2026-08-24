@@ -8,14 +8,17 @@ The three native backends share one owned-host lifecycle and keep their event-lo
 
 | Feature | Windows | macOS | Linux |
 | --- | --- | --- | --- |
-| Observation | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` | listen-only `CGEventTap` | evdev + hotplug rescan |
+| Observation | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` | active `CGEventTap` | evdev + hotplug rescan |
 | Injection | tagged batched `SendInput` | private-source tagged `CGEventPost` | dedicated uinput device |
+| Original-input suppression | Hook returns nonzero | Event tap returns null | Not implemented |
 | Physical/synthetic classification | injection tag | injection tag | virtual-device identity |
 | Keyboard/mouse/buttons/wheel | Yes | Yes | Yes |
 | Transparent retained overlay | winit/wgpu | accessory-policy winit/wgpu | winit/wgpu; compositor-dependent |
-| Local live verification | Pending | Passed on arm64 | Pending |
+| Local live verification | Pending | Loopback + suppression passed on arm64 | Pending |
 
 Windows and Linux currently pass unit/mapping tests and x86_64 cross-target Clippy from macOS. Run the target-machine checks below before treating a release artifact as verified.
+
+Windows/macOS suppression uses a lock-free trigger table and paired down/repeat/up tracking. Linux cannot safely suppress selected evdev events by dropping reads: it must exclusively grab each physical device and relay every non-consumed capability through a virtual device. That full relay is not implemented, so Linux does not advertise `NativeInputSuppression` and `consume` currently leaves original input visible there.
 
 For step-by-step setup, expected JSON, benchmark interpretation, OS-specific failure checks, and a report template, use [Platform Verification Guide](platform-verification.md).
 
@@ -49,11 +52,14 @@ bun install --frozen-lockfile
 bun run build:native
 bun packages/spellwire/src/cli.ts permissions
 bun run test:platform-loopback
+bun run test:consume-macos # macOS only
 bun run bench:platform -- 10000
 target/release/spellwire-overlay --smoke
 ```
 
 The loopback sends a tagged synthetic F20 through the real platform injector, observes it through the global backend, and verifies that a synthetic-source VM handler updates named native state.
+
+The macOS consume smoke first validates its tail event tap with two unblocked transitions. It then verifies state-gated pass-through and finally requires one VM hit with zero forwarded transitions.
 
 This abbreviated command list is the release gate, not the full setup guide. Windows uses `target/release/spellwire-overlay.exe`; Linux needs evdev/uinput access and a graphical session for overlay smoke. Follow [Platform Verification](platform-verification.md) before reporting a failure.
 

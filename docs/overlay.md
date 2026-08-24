@@ -4,6 +4,8 @@
 
 Spellwire's modern overlay API combines native state, Figma-style auto layout, retained diffing, and safe lifecycle ownership. No absolute coordinate math or manual `scene.update()` / `renderer.apply()` loop is required.
 
+For the matching realtime hotkey source and the complete input → native state → overlay update path, see [Hotkeys and state-driven automation](automation.md#one-state-drives-input-and-overlay).
+
 ## Complete state + overlay program
 
 ```ts

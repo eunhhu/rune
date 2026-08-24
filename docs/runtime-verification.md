@@ -8,6 +8,7 @@
 bun install --frozen-lockfile
 bun run typecheck
 bun run test:ts
+bun run test:docs
 bun run pack:dry-run
 cargo fmt --all -- --check
 cargo test --workspace --locked
@@ -25,6 +26,7 @@ Run on every release OS after granting platform permissions:
 bun run build:native
 bun packages/spellwire/src/cli.ts permissions
 bun run test:platform-loopback
+bun run test:consume-macos # macOS only
 bun run bench:platform -- 10000
 target/release/spellwire-overlay --smoke
 ```
@@ -41,10 +43,11 @@ On macOS arm64, the following passed:
 - TypeScript build and tests;
 - ABI v4 load, bulk state snapshot, and permission read through Bun FFI;
 - global tagged F20 injection observed through `CGEventTap` and handled by the synthetic VM trigger;
+- CoreGraphics suppression probe: baseline/inactive-gate transitions `2/2`, active native handler hit `1`, forwarded transitions `0`;
 - native observer publication into `DynamicInputLane` with zero drops in the smoke scenario;
 - transparent click-through overlay creation at Retina resolution and mutation rendering;
 - native OS-submission benchmark execution.
 
-Windows x64 and Linux x64 backend code also passes local cross-target Clippy. That proves compilation, not live permissions/device/display behavior; target-machine output should be recorded before release.
+Windows x64 and Linux x64 backend code also passes local cross-target Clippy. That proves compilation, not live permissions/device/display behavior. Windows suppression still needs a target-machine run; Linux suppression is not implemented and its capability bit remains unset.
 
 None of these checks measures physical switch-to-target-application latency. Such a claim needs external timestamped hardware or target-application instrumentation.
