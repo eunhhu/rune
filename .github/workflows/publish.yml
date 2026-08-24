@@ -98,8 +98,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          verify_public_version() {
+            name="$1"
+            version="$2"
+            attempts=36
+
+            for attempt in $(seq 1 "${attempts}"); do
+              response="$(mktemp)"
+              url="https://registry.npmjs.org/${name}/${version}?spellwire_verify=${GITHUB_RUN_ID}-${attempt}-$(date +%s%N)"
+
+              if curl --fail --silent --show-error --location \
+                --header 'Cache-Control: no-cache' \
+                --output "${response}" \
+                "${url}" 2>/dev/null; then
+                actual="$(node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(String(data.version ?? ""));' "${response}")"
+                rm -f "${response}"
+
+                if [ "${actual}" = "${version}" ]; then
+                  echo "${name}@${version} is visible on the public npm registry."
+                  return 0
+                fi
+              else
+                rm -f "${response}"
+              fi
+
+              if [ "${attempt}" -lt "${attempts}" ]; then
+                echo "${name}@${version} is not visible yet (attempt ${attempt}/${attempts}); waiting for registry propagation..."
+                sleep 5
+              fi
+            done
+
+            echo "::error::${name}@${version} was published or skipped, but did not become visible on the public npm registry within 3 minutes."
+            return 1
+          }
+
           spellwire_version="$(node -p "require('./packages/spellwire/package.json').version")"
           create_version="$(node -p "require('./packages/create-spellwire/package.json').version")"
-          test "$(npm view "spellwire@${spellwire_version}" version)" = "${spellwire_version}"
-          test "$(npm view "create-spellwire@${create_version}" version)" = "${create_version}"
+
+          verify_public_version spellwire "${spellwire_version}"
+          verify_public_version create-spellwire "${create_version}"
+
           echo "Published spellwire@${spellwire_version} and create-spellwire@${create_version}."
