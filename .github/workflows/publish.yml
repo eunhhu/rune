@@ -10,7 +10,114 @@ permissions:
   id-token: write
 
 jobs:
+  prebuild:
+    name: Native / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - macos-15-intel
+          - macos-15
+          - windows-latest
+          - windows-11-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Build native runtime and overlay
+        run: cargo build -p spellwire-native -p spellwire-overlay --release --locked
+
+      - name: Optionally sign Windows binaries
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_SIGNING_PFX_BASE64 -or -not $env:WINDOWS_SIGNING_PFX_PASSWORD) {
+            Write-Host "Windows signing secrets absent; keeping unsigned artifacts."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "spellwire-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe was not found" }
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_SIGNING_PFX_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 target\release\spellwire_native.dll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_SIGNING_PFX_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 target\release\spellwire-overlay.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item $pfx -Force
+
+      - name: Optionally sign and notarize macOS binaries
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${MACOS_CERTIFICATE_P12_BASE64:-}" || -z "${MACOS_CERTIFICATE_PASSWORD:-}" || -z "${MACOS_SIGNING_IDENTITY:-}" ]]; then
+            echo "macOS signing secrets absent; keeping unsigned artifacts."
+            exit 0
+          fi
+          keychain="${RUNNER_TEMP}/spellwire-signing.keychain-db"
+          certificate="${RUNNER_TEMP}/spellwire-signing.p12"
+          keychain_password="$(openssl rand -hex 24)"
+          cleanup() {
+            security delete-keychain "${keychain}" >/dev/null 2>&1 || true
+            rm -f "${certificate}"
+          }
+          trap cleanup EXIT
+          printf '%s' "${MACOS_CERTIFICATE_P12_BASE64}" | /usr/bin/base64 -D > "${certificate}"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          security import "${certificate}" -k "${keychain}" -P "${MACOS_CERTIFICATE_PASSWORD}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${keychain_password}" "${keychain}"
+          codesign --force --options runtime --timestamp --keychain "${keychain}" \
+            --sign "${MACOS_SIGNING_IDENTITY}" target/release/libspellwire_native.dylib
+          codesign --force --options runtime --timestamp --keychain "${keychain}" \
+            --sign "${MACOS_SIGNING_IDENTITY}" target/release/spellwire-overlay
+          codesign --verify --strict --verbose=2 target/release/libspellwire_native.dylib
+          codesign --verify --strict --verbose=2 target/release/spellwire-overlay
+
+          if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]; then
+            notarize_dir="${RUNNER_TEMP}/spellwire-notarize"
+            mkdir -p "${notarize_dir}"
+            cp target/release/libspellwire_native.dylib target/release/spellwire-overlay "${notarize_dir}/"
+            ditto -c -k --keepParent "${notarize_dir}" "${RUNNER_TEMP}/spellwire-native.zip"
+            xcrun notarytool submit "${RUNNER_TEMP}/spellwire-native.zip" \
+              --apple-id "${APPLE_ID}" --team-id "${APPLE_TEAM_ID}" \
+              --password "${APPLE_APP_PASSWORD}" --wait
+          else
+            echo "Apple notarization secrets absent; signed artifacts were not notarized."
+          fi
+
+      - name: Stage package artifacts and checksums
+        run: bun run stage:native
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spellwire-native-${{ runner.os }}-${{ runner.arch }}
+          path: packages/spellwire/native
+          if-no-files-found: error
+
   publish:
+    needs: prebuild
     runs-on: ubuntu-latest
     env:
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -18,6 +125,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: spellwire-native-*
+          path: packages/spellwire/native
+          merge-multiple: true
 
       - uses: oven-sh/setup-bun@v2
         with:
