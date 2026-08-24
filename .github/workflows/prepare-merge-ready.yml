@@ -32,7 +32,7 @@ jobs:
             echo "required=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Preserve the current handbook
+      - name: Preserve the current handbook and workflows
         if: steps.source.outputs.required == 'true'
         shell: bash
         run: |
@@ -40,6 +40,7 @@ jobs:
           mkdir -p /tmp/rune-preserve
           cp README.md /tmp/rune-preserve/README.md
           cp -a docs /tmp/rune-preserve/docs
+          cp -a .github/workflows /tmp/rune-preserve/workflows
           if [[ -d packaging ]]; then cp -a packaging /tmp/rune-preserve/packaging; fi
 
       - name: Materialize the complete source tree
@@ -64,6 +65,9 @@ jobs:
           rm -rf docs
           cp -a /tmp/rune-preserve/docs docs
           cp /tmp/rune-preserve/README.md README.md
+          rm -rf .github/workflows
+          mkdir -p .github
+          cp -a /tmp/rune-preserve/workflows .github/workflows
           if [[ -d /tmp/rune-preserve/packaging ]]; then
             rm -rf packaging
             cp -a /tmp/rune-preserve/packaging packaging
