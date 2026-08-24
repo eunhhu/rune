@@ -1,119 +1,72 @@
 # Architecture
 
-Spellwire is currently composed of six explicit layers: public TypeScript package, AOT compiler, versioned wire format, native VM, simulator, and host boundary.
+[한국어](architecture.ko.md)
 
-## 1. TypeScript SDK
+Spellwire separates unrestricted Bun control-plane work from bounded native event execution.
 
-`spellwire` supplies the SDK and compiler exports:
-
-- USB HID-style `Key` identifiers and mouse buttons;
-- top-level `rt.on*` handler markers;
-- output and held-input intrinsics;
-- JavaScript fallback registrations/action sinks;
-- a SharedArrayBuffer SPSC dynamic input lane;
-- native state wrappers;
-- a retained overlay scene model.
-
-The handler markers are ordinary TypeScript functions when executed by Bun, which makes source files testable. The compiler recognizes the same call shapes and does not depend on executing the module to discover handlers.
-
-## 2. AOT compiler
-
-The compiler embedded in `spellwire` parses TypeScript with the TypeScript compiler API, collects representable module state, finds top-level realtime registrations, resolves constants, validates the supported subset, and lowers handlers to an integer bytecode instruction stream.
+## Data flow
 
 ```text
-module-scope let/const
-handler callback
-helper functions
-control flow + expressions
-          │
-          ▼
- states + handler table + bytecode + resource limits
+.spellwire.ts
+    │ TypeScript AST compilation
+    ▼
+SPWR bytecode + named-state manifest
+    │ Bun FFI load/reload
+    ▼
+platform observer → bounded channel → runtime worker → platform injector
+                                          │
+                                          ├─ fixed continuation deadlines
+                                          └─ optional SharedArrayBuffer event ring → Bun
+
+Bun OverlayScene mutations → pipe → separate native retained renderer
 ```
 
-Compilation happens once. No AST, source string, or TypeScript runtime is needed during native dispatch.
+## TypeScript SDK and compiler
 
-## 3. Wire format
+The public package supplies USB HID-style keys, realtime registration markers, output/held intrinsics, fallback test helpers, the embedded compiler, `NativeHost`, `DynamicInputLane`, named state wrappers, and the overlay client.
 
-The encoder writes a versioned `SPWR` binary containing:
+The compiler parses source without executing it, finds top-level `rt.on*` registrations, resolves representable state/constants/helpers, validates the bounded subset, and emits:
 
-- header/version and resource limits;
-- initial persistent-state values;
-- triggers and bytecode entry points;
-- fixed-width instructions.
+- initial persistent integer state;
+- source/device/edge/code triggers;
+- fixed-width integer instructions;
+- stack/local/instruction limits.
 
-`spellwire-core::Program::decode` validates structural bounds before `Runtime::new` validates entries, jumps, state/local slots, stack limits, and instruction budgets.
+The companion manifest maps source state names to numeric slots and kinds. It is used only by the Bun control plane.
 
-The companion JSON manifest is control-plane metadata; it is not read on the native input path.
+## Wire format and VM
 
-## 4. Native VM
+`SPWR` has a versioned header followed by resource limits, state, handlers, and bytecode. `Program::decode` validates structural bounds; `Runtime::new` validates entries, jumps, slots, stack behavior, and budgets before any dispatch.
 
-The runtime builds a fixed trigger table indexed by source, device, edge, and code. Dispatch performs direct indexing into contiguous handler-ID buckets.
+The runtime uses a direct source × device × edge × code trigger table, fixed held-input bitmaps, fixed VM stack/locals/output storage, and a fixed-capacity continuation scheduler. A zero-delay instruction run becomes one output batch. `sleepUs()` flushes that batch and yields the handler with an absolute monotonic deadline. The owned host polls ready continuations while continuing to receive new input and control commands.
 
-```text
-explicit InputEvent
-      │
-      ▼
-update held-input bitmap
-      │
-      ▼
-source × device × edge × code lookup
-      │
-      ▼
-prevalidated integer VM
-      │
-      ▼
-fixed 64-event output batches
-```
+The lower-level compatibility engine retains synchronous delay behavior for simple embedders.
 
-`VmScratch` owns fixed stack, local, and output arrays. Successful dispatch does not parse strings, create a JavaScript callback, or allocate per instruction. Persistent state is owned by `Runtime` and survives between dispatches.
+## Owned native host
 
-## 5. Host boundary
+`spellwire-native` implements one lifecycle above three backends:
 
-`spellwire-native` exposes a C ABI. A host passes a compiled binary, dispatches explicit events, reads/writes state slots, and receives output batches through a callback.
+- Windows: low-level keyboard/mouse hook message loop and tagged `SendInput`;
+- macOS: listen-only CoreGraphics event tap and tagged `CGEventPost` from a private source;
+- Linux: nonblocking evdev polling/hotplug discovery and a dedicated uinput device.
 
-The current ABI is deliberately host-driven:
+Observation callbacks perform bounded translation and `try_send`; the worker owns all VM state, deadlines, reloads, state commands, and injection. Stopping the host joins observer/worker threads and releases tracked held synthetic inputs.
 
-```text
-host observes input → spellwire_engine_dispatch(...)
-                    → VM output callback → host injects output
-```
+## Dynamic JavaScript lane
 
-The repository does not yet contain a host that owns Windows Raw Input/hooks, a macOS event tap, or Linux evdev/uinput. Consequently, only host-callback injection is advertised by `spellwire_capabilities()`.
+`DynamicInputLane` is best-effort control-plane plumbing for events that truly require JS. `NativeHost.attachDynamicLane()` shares its fixed six-word SPSC ring with the worker. The producer never invokes JavaScript and drops/counts overflow instead of blocking realtime processing. Bun decides when and where to call `drain()`.
 
-## Native simulator
+## Overlay isolation
 
-`spellwire-sim` is a deterministic development host built directly on `spellwire-core`. It loads the same encoded binary, dispatches named input events, records native output batches, and prints persistent state after each event.
+The overlay is a companion executable because desktop window event loops need main-thread ownership, especially on macOS. It retains scene nodes, draws only after mutations, and communicates through newline JSON. It shares no locks with the input worker; renderer exit cannot stop the host.
 
-It is useful for API/compiler/VM feedback, but it intentionally does not pretend to measure platform input latency.
+## Measurement boundaries
 
-## Two TypeScript lanes
+Report these separately:
 
-Spellwire's intended application split is:
+1. **Core dispatch:** lookup + VM + null/recording injector (`bun run bench`).
+2. **OS submission:** native platform call return (`bun run bench:platform`).
+3. **OS loopback:** injection → native observation → VM state (`bun run test:platform-loopback`).
+4. **Physical end-to-end:** switch → HID → OS → Spellwire → target application.
 
-```text
-ordinary Bun/TypeScript
-  configuration, files, networking, logging, hot reload, overlay state
-                     │
-                     │ compile/load/state control
-                     ▼
-native realtime VM
-  bounded state machines and latency-sensitive input/output logic
-```
-
-`DynamicInputLane` is a best-effort bridge for events that genuinely need JavaScript. It uses an SPSC shared ring so a native producer does not have to invoke JS directly for every event.
-
-## Delay and batching semantics
-
-Output instructions accumulate until a delay, batch capacity, or handler halt. A delay flushes the batch and advances an absolute monotonic deadline, avoiding relative-sleep drift across a sequence.
-
-The current delay waits synchronously. A continuation scheduler is a future runtime component and should use fixed-capacity queues so yielding does not add heap allocation to the hot path.
-
-## Performance measurement scopes
-
-Measurements must identify their boundary:
-
-1. **Core dispatch:** trigger lookup + VM + null/recording injector.
-2. **Host submission:** host-observed event → platform injection API submission.
-3. **Physical end-to-end:** switch → HID → OS → host → injection → target application.
-
-Only the first exists in this branch. The other two cannot be claimed until direct platform hosts and appropriate instrumentation exist.
+Only the last boundary requires external hardware/target instrumentation and is not inferred from the first three.

@@ -1,14 +1,12 @@
 # Native C ABI
 
-`spellwire-native` is built as a `cdylib` and `rlib`. The C ABI is a small host-driven boundary around the native VM.
+[한국어](native-abi.ko.md)
 
-Build it:
+`spellwire-native` builds as a `cdylib` and `rlib`:
 
 ```bash
 cargo build -p spellwire-native --release --locked
 ```
-
-Artifacts are named according to the platform:
 
 ```text
 Windows: target/release/spellwire_native.dll
@@ -19,55 +17,102 @@ Linux:   target/release/libspellwire_native.so
 ## Version and capabilities
 
 ```c
-uint32_t spellwire_abi_version(void);
+uint32_t spellwire_abi_version(void);       // 3
 uint32_t spellwire_capabilities(void);
+uint32_t spellwire_permission_status(void);
+uint32_t spellwire_request_permissions(void);
 ```
 
-The current ABI version is `2`.
-
-Capability bits:
+Capability bits are:
 
 ```text
 1 << 0  HostCallbackInjection
 1 << 1  NativeObservation
 1 << 2  NativeInjection
-1 << 3  NativeOverlay
+1 << 3  NativeOverlay       (reserved; renderer is a companion process)
+1 << 4  HostLifecycle
+1 << 5  NonBlockingDelay
 ```
 
-The current implementation returns only `HostCallbackInjection`.
+The current library returns `0x37`: every bit above except `NativeOverlay`. Permission bits are `1 << 0` observe and `1 << 1` inject.
 
-## Engine lifecycle
+## Owned platform host
+
+The normal live-input API owns the platform observer, runtime worker, continuation scheduler, and injector:
+
+```c
+SpellwireHost *spellwire_host_new(const uint8_t *bytes, size_t len);
+void spellwire_host_free(SpellwireHost *host);
+int32_t spellwire_host_start(SpellwireHost *host);
+int32_t spellwire_host_stop(SpellwireHost *host);
+int32_t spellwire_host_reload(
+  SpellwireHost *host,
+  const uint8_t *bytes,
+  size_t len,
+  bool preserve_positional_state
+);
+int32_t spellwire_host_dispatch(
+  SpellwireHost *host,
+  uint8_t device,
+  uint16_t code,
+  uint8_t edge,
+  uint8_t source
+);
+int32_t spellwire_host_state_get(const SpellwireHost *host, size_t slot, int64_t *output);
+int32_t spellwire_host_state_set(SpellwireHost *host, size_t slot, int64_t value);
+size_t spellwire_host_last_error(const SpellwireHost *host, char *buffer, size_t capacity);
+```
+
+`start` creates the OS injector/observer and one runtime worker. Observers publish into a bounded channel; delayed handlers yield into a fixed-capacity deadline scheduler. `stop` shuts down observation, clears pending continuations, and releases synthetic key/button downs tracked by the host. `free` also stops a running host.
+
+Reload is synchronous. The low-level flag copies common state slots positionally. The Bun wrapper passes false and preserves compatible values by manifest name and kind, preventing state reordering from corrupting values.
+
+`spellwire_host_last_error(host, NULL, 0)` returns the required UTF-8 buffer length including NUL. A second call copies the most recent platform/runtime message.
+
+## Shared dynamic input ring
+
+```c
+int32_t spellwire_host_set_input_ring(
+  SpellwireHost *host,
+  int32_t *words,
+  size_t word_len,
+  size_t capacity
+);
+```
+
+The ring layout is four atomic header words followed by `capacity * 6` event words:
+
+```text
+header: write, read, dropped, closed
+record: device, code, edge, source, timestamp_ns_low, timestamp_ns_high
+```
+
+Capacity must be a power of two. Native code stores a record then release-stores `write`; the Bun SPSC consumer acquire-loads it. A full ring increments `dropped` and never overwrites unread events. Passing null detaches synchronously. Attached storage must remain live until detach or host stop; `NativeHost.attachDynamicLane()` retains the `SharedArrayBuffer` view for this lifetime.
+
+## Compatibility engine API
+
+Hosts that already own observation/injection may use the lower-level synchronous engine:
 
 ```c
 SpellwireEngine *spellwire_engine_new(const uint8_t *bytes, size_t len);
 void spellwire_engine_free(SpellwireEngine *engine);
-```
-
-`spellwire_engine_new` decodes and validates a complete `.spellwire.bin` buffer and copies the program into owned native memory. It returns null on invalid input.
-
-The engine pointer is single-owner and must be freed exactly once.
-
-## Output callback
-
-```c
-typedef int32_t (*SpellwireOutputCallback)(
-  void *context,
-  const SpellwireOutputEvent *events,
-  size_t event_count
-);
-
 int32_t spellwire_engine_set_output_callback(
   SpellwireEngine *engine,
   SpellwireOutputCallback callback,
   void *context
 );
+int32_t spellwire_engine_dispatch(
+  SpellwireEngine *engine,
+  uint8_t device,
+  uint16_t code,
+  uint8_t edge,
+  uint8_t source
+);
+int32_t spellwire_engine_state_get(const SpellwireEngine *engine, size_t slot, int64_t *output);
+int32_t spellwire_engine_state_set(SpellwireEngine *engine, size_t slot, int64_t value);
 ```
 
-Each callback receives one contiguous zero-delay output batch. Returning zero reports success; any non-zero status aborts the current dispatch as an injection error.
-
-Callbacks must not call dispatch, state, callback-registration, or free functions on the same engine. Such reentrant operations return `-6` (`engine busy`); reentrant `spellwire_engine_free` is ignored and must be called again after the outer dispatch returns. Queue follow-up input or lifecycle work in the host instead.
-
-`SpellwireOutputEvent` is a fixed C representation:
+Its callback receives contiguous zero-delay batches:
 
 ```c
 typedef struct {
@@ -79,30 +124,9 @@ typedef struct {
 } SpellwireOutputEvent;
 ```
 
-Kinds:
+Kinds are 1 key, 2 mouse button, 3 relative move, and 4 wheel. `flags & 1` is the down state for keys/buttons. The compatibility dispatch waits synchronously for delay deadlines. Engine operations are serialized; concurrent/reentrant access returns `-6`, and free must not race another thread.
 
-| `kind` | Meaning | Fields |
-| ---: | --- | --- |
-| 1 | key | `code`, `flags & 1` is down |
-| 2 | mouse button | `code`, `flags & 1` is down |
-| 3 | relative mouse move | `x`, `y` |
-| 4 | mouse wheel | `x`, `y` |
-
-A null callback is allowed; output batches are then discarded.
-
-## Explicit event dispatch
-
-```c
-int32_t spellwire_engine_dispatch(
-  SpellwireEngine *engine,
-  uint8_t device,
-  uint16_t code,
-  uint8_t edge,
-  uint8_t source
-);
-```
-
-Values:
+## Values and errors
 
 ```text
 device: 0 keyboard, 1 mouse button
@@ -110,28 +134,4 @@ edge:   0 down, 1 up
 source: 0 physical, 1 synthetic
 ```
 
-The function updates held-input state, matches triggers, executes bytecode, waits for delays, and invokes the output callback. Engine operations are serialized: concurrent or reentrant access returns `-6`. Freeing must not race with another thread using the engine.
-
-The ABI does **not** currently start a platform observer thread. The host is responsible for obtaining input events and translating output callback records to its platform injection API.
-
-## Persistent state
-
-```c
-int32_t spellwire_engine_state_get(
-  const SpellwireEngine *engine,
-  size_t slot,
-  int64_t *output
-);
-
-int32_t spellwire_engine_state_set(
-  SpellwireEngine *engine,
-  size_t slot,
-  int64_t value
-);
-```
-
-Use the compiler-generated JSON manifest to map source variable names to slots. State access must not race with dispatch on the same engine; the current ABI does not add a mutex or atomic state layer.
-
-## Error handling
-
-The ABI uses null pointers and negative integer status codes rather than allocating error strings on the dispatch path. Status `-6` consistently means that the engine is already busy. Hosts should validate the binary/manifest at load time and translate status codes outside latency-sensitive code.
+Zero means success. Important host statuses are `-1` null, `-2` invalid argument, `-5` runtime failure, `-7` not running, `-8` already running, `-9` platform failure, `-10` channel failure, and `-11` continuation capacity exhausted. Status values avoid allocation on the event path; read the error string on the control plane.

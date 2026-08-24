@@ -1,5 +1,7 @@
 # TypeScript Runtime
 
+[한국어](typescript-runtime.ko.md)
+
 Spellwire uses TypeScript as an authoring language and compiles the latency-sensitive subset ahead of time. A source file does not need a wrapper such as `rt.load()`; the `.spellwire.ts` module itself is the compilation unit.
 
 ## Compilation boundary
@@ -133,9 +135,9 @@ The compiler recognizes these functions by name and emits native opcodes.
 
 ## Delay behavior
 
-`sleepUs(n)` flushes the pending output batch and advances an absolute monotonic deadline. The runtime sleeps until the configured spin tail, then actively spins for the remaining interval.
+`sleepUs(n)` flushes the pending output batch and advances an absolute monotonic deadline. The live owned host stores the handler continuation in a fixed-capacity queue and resumes it when due, so the observer/runtime worker can accept unrelated input and control commands meanwhile. A zero-duration yield may resume in the same poll.
 
-The current VM executes delays synchronously on the dispatching thread. A preallocated continuation/deadline scheduler is planned so long macro waits can yield without blocking input observation.
+The low-level compatibility engine and deterministic simulator preserve synchronous waiting semantics. This keeps the small embedding ABI simple; use `NativeHost` for non-blocking live observation.
 
 Desktop operating systems are not hard realtime schedulers; microsecond syntax is a requested deadline, not a guarantee that physical end-to-end latency has the same precision.
 
@@ -169,6 +171,7 @@ Current defaults and caps:
 | Native maximum stack | 256 values |
 | Native maximum locals | 256 values |
 | Native output batch | 64 events |
+| Live pending continuations | 64 |
 | Default instruction budget | 100,000 instructions/handler |
 
 Programs are validated before dispatch. Invalid jumps, slots, entries, limits, and empty programs are rejected during loading.

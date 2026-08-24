@@ -1,5 +1,7 @@
 # Troubleshooting
 
+[한국어](troubleshooting.ko.md)
+
 ## `spellwire` or `spellwire/compiler` cannot be resolved
 
 Install the workspace with Bun:
@@ -53,28 +55,38 @@ See [TypeScript Runtime](typescript-runtime.md).
 
 ## `sleepUs()` is inaccurate
 
-The current runtime uses an absolute deadline and a spin tail, but a general-purpose desktop OS is not a hard realtime scheduler. The simulator also executes delays synchronously, so long waits make the command appear paused.
+The live host uses absolute deadlines and non-blocking continuations, but a general-purpose desktop OS is not a hard realtime scheduler. The compatibility engine/simulator executes delays synchronously, so long waits make simulation appear paused.
 
 Microsecond input is a deadline request, not a physical end-to-end guarantee.
 
 ## `bun macro.spellwire.ts` produces no global keyboard events
 
-That is expected in the current branch. Executing the source directly registers JavaScript fallback handlers; it does not install a Windows/macOS/Linux observer.
+Executing a source module directly registers fallback handlers only. Start the native host through the CLI:
 
 Use:
 
 ```bash
-bunx spellwire compile macro.spellwire.ts
-cargo run -q -p spellwire-cli --locked -- simulate macro.spellwire.bin key-down:Q key-up:Q
+bun run build:native
+bun packages/spellwire/src/cli.ts run macro.spellwire.ts
 ```
 
-Direct OS backends are listed as planned in [Platform Status](platforms.md).
+`run` checks and requests permissions before host startup. Use `spellwire watch macro.spellwire.ts` when source changes should reload automatically.
+
+On Linux, configure evdev/uinput access. On Windows, injection into a higher-integrity process is blocked by UIPI. See [Platform Status](platforms.md).
+
+Follow [Live Native Host Guide](live-host.md) for the exact host lifecycle and [Platform Verification](platform-verification.md) for OS-specific permission checks.
 
 ## Native library output does nothing
 
-`spellwire-native` discards output if no host callback is installed. A host must call `spellwire_engine_set_output_callback` and translate received batches to its platform injection API.
+The low-level `SpellwireEngine` discards output if no callback is installed. Use the owned `NativeHost`/`spellwire_host_*` lifecycle for built-in OS injection, or install an engine output callback in a custom embedder.
 
-The ABI does not currently provide `start()` or `stop()` functions for global observation. See [Native C ABI](native-abi.md).
+Normal CLI startup reports missing permissions automatically. Advanced embedders can check `host.permissionStatus()` and `spellwire_host_last_error`. Unsupported HID usages return an explicit platform error.
+
+## Native overlay does not start
+
+Build both native targets with `bun run build:native`. Set `SPELLWIRE_OVERLAY_EXECUTABLE` for a nonstandard location. Linux needs an active graphical session; always-on-top transparency remains compositor-dependent.
+
+Run the target-specific smoke command and compare its stderr with the failure matrix in [Platform Verification](platform-verification.md).
 
 ## Simulator rejects an event
 
@@ -105,7 +117,7 @@ Remove TypeScript build outputs with `bun run clean:ts`.
 
 ## Rust tests pass but Clippy prints warnings
 
-The workspace enables `clippy::pedantic` at warning level. CI runs Clippy on every target, but it does not pass `-D warnings`; warnings remain visible while compile/test failures are blocking.
+The workspace enables `clippy::pedantic`. CI and `bun run check` pass `-D warnings`, so warnings are blocking.
 
 ## Verify everything locally
 
@@ -115,7 +127,11 @@ cargo clippy --workspace --all-targets --locked
 bun run compile:example
 bun run inspect:example
 bun run simulate:example
+bun run test:platform-loopback
+target/release/spellwire-overlay --smoke
 ```
+
+Use `target/release/spellwire-overlay.exe --smoke` on Windows. The OS loopback and platform benchmark need permissions and should be recorded separately from portable source checks. [Platform Verification](platform-verification.md) gives exact expected output and interpretation.
 
 ## Reporting a compiler/VM issue
 
@@ -128,4 +144,4 @@ Include:
 - compiler diagnostic or simulator output;
 - generated manifest when state mapping matters.
 
-Latency reports are premature for platform input until a direct backend exists. Core benchmark reports should identify that they measure VM dispatch only.
+Latency reports must identify whether they measure core dispatch, OS submission, OS loopback, or physical switch-to-application behavior.

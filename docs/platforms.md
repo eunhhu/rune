@@ -1,60 +1,66 @@
 # Platform Status
 
-Spellwire's compiler, core VM, simulator, and C ABI build on Windows, macOS, and Linux. Direct system-wide input backends are not present in the current branch.
+[한국어](platforms.ko.md)
 
-## Current matrix
+The three native backends share one owned-host lifecycle and keep their event-loop details platform-specific.
+
+## Matrix
 
 | Feature | Windows | macOS | Linux |
 | --- | --- | --- | --- |
-| TypeScript compiler | Yes | Yes | Yes |
-| Native VM/core | Yes | Yes | Yes |
-| `spellwire-native` C ABI | Yes | Yes | Yes |
-| `spellwire-sim` | Yes | Yes | Yes |
-| Global input observation | No | No | No |
-| Native input injection | No | No | No |
-| Native overlay renderer | No | No | No |
+| Observation | `WH_KEYBOARD_LL` / `WH_MOUSE_LL` | listen-only `CGEventTap` | evdev + hotplug rescan |
+| Injection | tagged batched `SendInput` | private-source tagged `CGEventPost` | dedicated uinput device |
+| Physical/synthetic classification | injection tag | injection tag | virtual-device identity |
+| Keyboard/mouse/buttons/wheel | Yes | Yes | Yes |
+| Transparent retained overlay | winit/wgpu | accessory-policy winit/wgpu | winit/wgpu; compositor-dependent |
+| Local live verification | Pending | Passed on arm64 | Pending |
 
-`spellwire_capabilities()` currently returns only the `HostCallbackInjection` bit on every target.
+Windows and Linux currently pass unit/mapping tests and x86_64 cross-target Clippy from macOS. Run the target-machine checks below before treating a release artifact as verified.
 
-## Permissions for the current Quick Start
+For step-by-step setup, expected JSON, benchmark interpretation, OS-specific failure checks, and a report template, use [Platform Verification Guide](platform-verification.md).
 
-The compiler and simulator do not observe or inject real input, so they require no special input permissions:
+## Permissions
 
-- no Windows elevation;
-- no macOS Input Monitoring or Accessibility permission;
-- no Linux evdev/uinput access.
+### Windows
 
-The included Linux udev rule is a future-backend packaging artifact and is not needed to compile or simulate a program.
+Normal desktop input usually needs no elevation. `SendInput` is subject to User Interface Privilege Isolation, so a non-elevated Spellwire process cannot inject into a higher-integrity target. Secure desktop/UAC prompts are out of scope.
 
-## Planned direct backends
+### macOS
 
-The intended low-overhead direction remains:
+Observation needs Input Monitoring. Injection needs Accessibility. Normal `spellwire run` and `spellwire watch` startup checks and requests both automatically. The following advanced diagnostic commands print the individual status bits:
 
-| Platform | Observation | Injection |
-| --- | --- | --- |
-| Windows | Raw Input or a carefully measured low-level hook | `SendInput` |
-| macOS | `CGEventTap` initially; IOHID mode only if justified | tagged `CGEventPost` |
-| Linux | evdev | uinput |
+```bash
+bun packages/spellwire/src/cli.ts permissions
+bun packages/spellwire/src/cli.ts permissions --request
+```
 
-These APIs are design targets, not implemented claims.
+Restart the terminal/application after changing privacy settings if macOS does not update an existing process.
 
-## Backend requirements
+### Linux
 
-A direct backend should not be marked complete until it has:
+The process needs read access to intended `/dev/input/event*` devices and write access to `/dev/uinput`. Reading evdev exposes global keyboard input and is security-sensitive. Review and install `packaging/linux/99-spellwire-input.rules` only for machines where that access is intended, then reload udev rules or log in again.
 
-- physical/synthetic recursion handling;
-- complete key translation tests for its supported map;
-- clear permission/setup diagnostics;
-- zero allocation in the input-to-dispatch path after startup;
-- output batching where the OS supports it;
-- clean start/stop and ownership semantics;
-- p50/p95/p99/p99.9 submission-latency measurements;
-- compile and smoke coverage on the target OS.
+## Target-machine verification
 
-## Linux security note
+From a checkout with Bun 1.4+ and Rust installed:
 
-Future evdev access exposes global keyboard input and is equivalent to keylogging capability. A shipped udev rule must be narrowly documented and appropriate for the deployment model. Do not install `packaging/linux/99-spellwire-input.rules` merely to use the current simulator.
+```bash
+bun install --frozen-lockfile
+bun run build:native
+bun packages/spellwire/src/cli.ts permissions
+bun run test:platform-loopback
+bun run bench:platform -- 10000
+target/release/spellwire-overlay --smoke
+```
 
-## Wayland and overlay
+The loopback sends a tagged synthetic F20 through the real platform injector, observes it through the global backend, and verifies that a synthetic-source VM handler updates named native state.
 
-An evdev/uinput input backend can operate below X11/Wayland, but an always-on-top transparent overlay remains compositor-dependent. Wayland layer-shell is not universal, especially across GNOME/KDE/wlroots environments. Overlay support must therefore be reported through capabilities rather than a single unconditional “Linux supported” flag.
+This abbreviated command list is the release gate, not the full setup guide. Windows uses `target/release/spellwire-overlay.exe`; Linux needs evdev/uinput access and a graphical session for overlay smoke. Follow [Platform Verification](platform-verification.md) before reporting a failure.
+
+## Key translation
+
+Public `Key` values use USB HID keyboard-page usages. Each backend has an explicit supported map and returns `unsupported USB HID key usage` instead of silently emitting a different key. Linux covers the full currently exported set. macOS and Windows omit usages their keyboard APIs cannot represent reliably; layout/media behavior should be checked on the target keyboard. Unknown vendor-page usages are intentionally not guessed.
+
+## Overlay limitations
+
+The renderer requests a transparent, topmost, click-through window and keeps rendering isolated from the input worker. Windows and macOS provide the needed window semantics. Linux support depends on the active display server/compositor; Wayland does not expose one universal always-on-top layer-shell contract through winit, so verify the intended GNOME/KDE/wlroots environment.

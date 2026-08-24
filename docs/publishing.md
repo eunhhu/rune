@@ -1,5 +1,7 @@
 # Publishing
 
+[한국어](publishing.ko.md)
+
 Spellwire uses two unscoped npm packages:
 
 - `spellwire`
@@ -25,7 +27,22 @@ cargo clippy --workspace --all-targets --locked
 cargo build --workspace --release --locked
 ```
 
-The package dry run must show only the intended source, README, license, and package metadata.
+The package dry run must show intended source/metadata plus `native/<platform>-<arch>/` runtime, overlay, and `SHA256SUMS` artifacts when run after staging.
+
+## Native artifacts
+
+The publish workflow first builds `spellwire-native` and `spellwire-overlay` on x64/arm64 Linux, macOS, and Windows runners. Each runner executes `bun run stage:native`, producing:
+
+```text
+packages/spellwire/native/<process.platform>-<process.arch>/
+  libspellwire_native.* or spellwire_native.dll
+  spellwire-overlay[.exe]
+  SHA256SUMS
+```
+
+Artifacts are uploaded separately, merged into the npm workspace in the publish job, and covered by the package `files` list.
+
+Windows signing is enabled when `WINDOWS_SIGNING_PFX_BASE64` and `WINDOWS_SIGNING_PFX_PASSWORD` exist. macOS Developer ID signing uses `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, and `MACOS_SIGNING_IDENTITY`; notarization additionally uses `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_PASSWORD`. Without these secrets the workflow produces explicit unsigned artifacts rather than claiming they are signed.
 
 ## npm token for the first publish
 
@@ -53,7 +70,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow publishes in this order:
+After all three native builds succeed, the workflow publishes in this order:
 
 1. `spellwire`
 2. `create-spellwire`
@@ -77,7 +94,7 @@ npm view spellwire version
 npm view create-spellwire version
 bun create spellwire smoke-test
 cd smoke-test
-bun run check
+bun run build
 ```
 
-Do not describe direct OS input or prebuilt native libraries as available until those artifacts are actually included and validated.
+After download, verify checksums and run the target-machine commands in [Runtime Verification](runtime-verification.md). Source implementation of the workflow is not evidence that signing, notarization, npm credentials, or public registry propagation succeeded.

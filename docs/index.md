@@ -1,15 +1,26 @@
 # Spellwire documentation
 
+[한국어](index.ko.md)
+
 Use these pages in order when evaluating the current alpha:
 
 1. **[Quick Start](quick-start.md)** — install or clone, compile, inspect, and simulate a stateful macro.
-2. **[API Reference](api.md)** — exact exports available from `spellwire` and `spellwire/compiler`.
-3. **[TypeScript Runtime](typescript-runtime.md)** — persistent state, control flow, helper functions, limits, and unsupported syntax.
-4. **[Architecture](architecture.md)** — public package, compiler, wire format, VM, simulator, and host boundary.
-5. **[Native C ABI](native-abi.md)** — embed the VM and receive native output batches.
-6. **[Platform Status](platforms.md)** — what builds on Windows/macOS/Linux and what is not implemented yet.
-7. **[Overlay](overlay.md)** — the retained scene API and renderer roadmap.
-8. **[Troubleshooting](troubleshooting.md)** — setup, compiler, simulator, and host-boundary issues.
-9. **[Publishing](publishing.md)** — npm package release and verification.
-10. **[Implementation Status](status.md)** — implemented features and next milestones.
-11. **[Verification](runtime-verification.md)** — checks that gate the source tree and pull request.
+2. **[Live Native Host Guide](live-host.md)** — permissions, CLI use, programmatic lifecycle, hot reload, named state, dynamic input, and safe shutdown.
+3. **[Platform Verification Guide](platform-verification.md)** — copyable macOS, Windows, and Linux checks with expected output and failure interpretation.
+4. **[API Reference](api.md)** — exact exports available from `spellwire` and `spellwire/compiler`.
+5. **[TypeScript Runtime](typescript-runtime.md)** — persistent state, control flow, helper functions, limits, and unsupported syntax.
+6. **[Architecture](architecture.md)** — public package, compiler, wire format, VM, simulator, and host boundary.
+7. **[Native C ABI](native-abi.md)** — owned platform host, shared input ring, and compatibility engine.
+8. **[Platform Status](platforms.md)** — backend APIs, permissions, validation, and target limitations.
+9. **[Overlay](overlay.md)** — retained scene API and native renderer process.
+10. **[Troubleshooting](troubleshooting.md)** — setup, compiler, simulator, and host-boundary issues.
+11. **[Publishing](publishing.md)** — npm package release and verification.
+12. **[Implementation Status](status.md)** — implemented features and external gates.
+13. **[Verification](runtime-verification.md)** — checks that gate the source tree and pull request.
+
+## Choose the right path
+
+- To learn the macro language without global hooks, complete **Quick Start** through the simulator.
+- To run real keyboard/mouse automation, continue with **Live Native Host Guide**.
+- To certify one OS or hand target-machine results back to a maintainer, use **Platform Verification Guide**.
+- To investigate an error, start with **Troubleshooting**, then follow its link to the relevant detailed guide.

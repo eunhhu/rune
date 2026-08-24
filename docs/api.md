@@ -1,5 +1,7 @@
 # API Reference
 
+[한국어](api.ko.md)
+
 This page documents the API that exists in the current source tree. It deliberately excludes older design sketches such as `macro(...)`, `spellwire.start()`, `rt.load(...)`, `on.keyDown(...)`, or `key.tap(...)`; those symbols are not exported by the current SDK.
 
 ## Package imports
@@ -7,6 +9,9 @@ This page documents the API that exists in the current source tree. It deliberat
 ```ts
 import {
   InputSource,
+  NativeHost,
+  NativeOverlayRenderer,
+  OverlayScene,
   Key,
   MouseButton,
   clickMouse,
@@ -24,15 +29,19 @@ import {
 } from "spellwire";
 ```
 
-The compiler package exports programmatic compiler/encoder APIs and a CLI:
+The compiler package exports programmatic compiler/encoder APIs. The CLI exposes three normal workflows:
 
 ```ts
 import { compileSource, encodeModule } from "spellwire/compiler";
 ```
 
 ```bash
+bunx spellwire run [macro.spellwire.ts]
+bunx spellwire watch [macro.spellwire.ts]
 bunx spellwire compile macro.spellwire.ts [output.spellwire.bin]
 ```
+
+All three default to `src/main.spellwire.ts` when input is omitted. `run` and `watch` compile source in memory, prepare permissions once, then start the same owned native host. `watch` adds only control-plane filesystem reload.
 
 ## Realtime registration
 
@@ -80,7 +89,7 @@ wheelMouse(0, 1)
 sleepUs(80)
 ```
 
-A zero-delay run of output intrinsics is collected into a fixed native output batch. `sleepUs()` flushes the current batch, advances an absolute monotonic deadline, and waits synchronously in the current VM implementation.
+A zero-delay run of output intrinsics is collected into a fixed native output batch. In the live host, `sleepUs()` flushes the batch and yields into the fixed-capacity absolute-deadline scheduler. The compatibility engine/simulator wait synchronously.
 
 Calling an output intrinsic directly in ordinary Bun code throws unless a fallback action sink has been installed with `withRealtimeActionSink()`.
 
@@ -191,6 +200,18 @@ unsubscribe();
 
 This is control-plane plumbing, not the native realtime handler path.
 
+Attach it to the live native producer before or after starting a host:
+
+```ts
+const host = await NativeHost.load("macro.spellwire.ts");
+host.attachDynamicLane(lane);
+host.start();
+
+// Drain from a Bun worker/timer at an application-appropriate cadence.
+lane.drain(1024);
+host.detachDynamicLane();
+```
+
 Each delivered event is a stable readonly snapshot. Registering or unregistering handlers during dispatch affects only subsequent events, and `drain()` cannot be called reentrantly on the same lane.
 
 ## Native state wrapper
@@ -203,12 +224,54 @@ enabled.set(false);
 console.log(enabled.get());
 ```
 
-The compiler-generated JSON manifest supplies names, slots, and kinds. The current repository does not yet provide the complete Bun FFI host that turns that manifest into named state properties.
+`NativeHost` constructs these wrappers from the compiler manifest:
+
+```ts
+const host = await NativeHost.load("macro.spellwire.ts");
+host.start();
+host.state("enabled").set(false);
+console.log(host.states.phase?.get());
+host.close();
+```
+
+`reload()` recompiles source/reloads bytes and preserves compatible state by source name and kind. `watch()` serializes filesystem-triggered reloads. `.bin` input uses the adjacent `.json` manifest or `manifestPath`.
+
+## Native host and permissions
+
+```ts
+const host = await NativeHost.load("macro.spellwire.ts", {
+  nativeLibraryPath: "/optional/explicit/library",
+});
+
+host.permissionStatus();
+host.requestPermissions();
+host.start();
+await host.reload();
+host.stop();
+host.close();
+```
+
+The host resolves a packaged platform library, `SPELLWIRE_NATIVE_LIBRARY`, or workspace release/debug build. `close()` is idempotent. Stopping releases tracked synthetic held inputs.
+
+| Member | Contract |
+| --- | --- |
+| `NativeHost.load(input, options?)` | Compile `.ts` in memory or load `.bin` plus manifest; validate ABI and allocate host |
+| `permissionStatus()` | Return observe/inject bitmask without prompting |
+| `requestPermissions()` | Request macOS grants; recheck current status on Windows/Linux |
+| `start()` / `stop()` | Start or stop owned observer, injector, runtime worker, and scheduler |
+| `reload({ preserveState? })` | Serialize reload and preserve running state by compatible manifest name/kind by default |
+| `watch(options?)` | Watch the input file with configurable debounce and reload callbacks |
+| `state(name)` / `states[name]` | Access a named `NativeState` from the current manifest |
+| `attachDynamicLane(lane)` | Publish observed input into the lane's six-word shared records |
+| `dispatch(...)` | Explicitly submit a VM input for tests or custom embedders |
+| `close()` | Stop if needed, free native ownership, and close the dynamic library |
+
+See [Live Native Host Guide](live-host.md) for complete long-running examples, signal handling, state-preservation rules, dynamic-lane timestamps/drops, library resolution order, and native error interpretation.
 
 ## Overlay scene model
 
-`OverlayScene` is an in-memory retained scene/mutation model. It does not create a window or render pixels yet. See [Overlay](overlay.md).
+`OverlayScene` retains text/rect/line nodes. `NativeOverlayRenderer.start()` launches the companion transparent renderer; `apply(scene)` sends only pending mutations. `show()`, `hide()`, `clear()`, and `close()` are control-plane operations. See [Overlay](overlay.md).
 
 ## Native ABI
 
-The C ABI creates/owns a native VM, dispatches explicit input events, exposes state slots, and sends output batches to a host callback. See [Native C ABI](native-abi.md).
+The ABI contains both the owned platform host and a compatibility callback engine. See [Native C ABI](native-abi.md).

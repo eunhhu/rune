@@ -1,6 +1,10 @@
 # Quick Start
 
-Spellwire can be installed into an existing Bun project or tested from a source checkout. The current alpha compiles stateful TypeScript into native bytecode and runs that bytecode through the real Rust VM simulator. It does **not** yet install a global keyboard/mouse observer.
+[한국어](quick-start.ko.md)
+
+Spellwire can be installed into an existing Bun project or tested from a source checkout. The alpha supports deterministic simulation and a live native global-input host.
+
+This page is the shortest safe path through the project. Complete the compiler and simulator steps before enabling global input. When you reach the live host, [Live Native Host Guide](live-host.md) explains every lifecycle option; [Platform Verification Guide](platform-verification.md) provides OS-specific permission and test commands.
 
 ## Install from npm
 
@@ -15,16 +19,26 @@ Or scaffold a project:
 ```bash
 bun create spellwire my-automation
 cd my-automation
-bun run check
+bun run start
 ```
 
-The generated project can author and compile `.spellwire.ts` modules. Live global input still requires a host/backend that is not bundled in this alpha.
+Release packages are assembled with a native library and overlay executable for each supported platform.
+
+The generated project intentionally exposes only three workflows:
+
+```bash
+bun run start  # compile in memory and run once
+bun run watch  # run and hot reload source changes
+bun run build  # write dist/main.spellwire.bin plus its JSON manifest
+```
+
+`start` and `watch` check/request global-input permissions automatically. No separate setup command is needed for the normal path.
 
 ## Develop from source
 
 ### Requirements
 
-- Bun 1.3.14 or newer
+- Bun 1.4.0 or newer
 - Rust stable
 - Git
 
@@ -170,7 +184,42 @@ The compiler writes `<program>.spellwire.bin.json` next to the binary. Its `stat
 }
 ```
 
-A future/live Bun host can use this manifest with the native state get/set ABI instead of hard-coding slot indexes.
+`NativeHost` uses this manifest to expose `host.states.combo` / `host.state("enabled")` and to preserve compatible values by name during hot reload.
+
+## Run live global input
+
+In a generated project, use the three scripts above. In a source checkout, first build the native library and overlay:
+
+```bash
+bun run build:native
+```
+
+Run once or watch:
+
+```bash
+bun packages/spellwire/src/cli.ts run macro.spellwire.ts
+bun packages/spellwire/src/cli.ts watch macro.spellwire.ts
+```
+
+Both commands compile `.ts` in memory and prepare permissions before starting the platform observer/injector. `watch` adds serialized filesystem reloads. They also accept a `.spellwire.bin` plus its adjacent JSON manifest. Press `Ctrl+C` to stop cleanly.
+
+Verify injection → observation → VM state on the current machine:
+
+```bash
+bun run test:platform-loopback
+bun run bench:platform -- 10000
+target/release/spellwire-overlay --smoke
+```
+
+On Windows, the overlay executable is `target/release/spellwire-overlay.exe`. On Linux, the overlay command needs an active graphical session. Do not interpret `bench:platform` as physical key-to-application latency; it measures only native OS submission-call return time.
+
+The loopback command should print JSON with all of these success fields:
+
+```json
+{"loopback":"ok","observed":1,"reloadReleasedHeldInput":true}
+```
+
+The actual output also includes `platform`, `arch`, and `elapsedUs`. See [Platform Verification](platform-verification.md) for the complete expected output, OS setup, and a result template.
 
 ## Verify the checkout
 
@@ -181,12 +230,14 @@ cargo clippy --workspace --all-targets --locked
 
 The permanent GitHub workflow additionally runs Rust tests/builds on Linux, macOS, and Windows, verifies Rust 1.81, and repeats this Quick Start as a smoke test.
 
-## Live system input status
+## Platform validation status
 
-`spellwire-native` currently exposes a host-callback ABI and reports only `HostCallbackInjection`. It does not yet expose a function that starts Windows Raw Input/hooks, a macOS event tap, or Linux evdev/uinput processing. Therefore:
+macOS arm64 has local permission, loopback, dynamic-lane, overlay, and submission-benchmark verification. Windows/Linux backends have target compilation and translation tests but still need the commands above on real target machines. See [Platform Status](platforms.md) for setup and exact limitations.
 
-- the simulator requires no Accessibility/Input Monitoring/udev permissions;
-- running the TypeScript source directly with Bun registers JavaScript fallback handlers but does not observe global input;
-- any document or example claiming that `bun macro.spellwire.ts` already installs a cross-platform global hook is outdated.
+## Where to continue
 
-See [Platform Status](platforms.md) and [Implementation Status](status.md) for the next milestone.
+- Build a production host: [Live Native Host Guide](live-host.md)
+- Learn every supported handler construct: [TypeScript Runtime](typescript-runtime.md)
+- Look up exports and signatures: [API Reference](api.md)
+- Verify macOS, Windows, or Linux: [Platform Verification Guide](platform-verification.md)
+- Diagnose a failure: [Troubleshooting](troubleshooting.md)

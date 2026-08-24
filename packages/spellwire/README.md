@@ -1,5 +1,7 @@
 # spellwire
 
+[한국어](README.ko.md)
+
 Stateful realtime input automation for Bun and TypeScript.
 
 ```bash
@@ -17,12 +19,20 @@ rt.onKeyDown(Key.Q, () => {
 });
 ```
 
-Compile the script:
+Run, watch, or compile the script:
 
 ```bash
+bunx spellwire run macro.spellwire.ts
+bunx spellwire watch macro.spellwire.ts
 bunx spellwire compile macro.spellwire.ts
 ```
 
-The alpha package includes the SDK, AOT compiler, CLI, JavaScript fallback lane, and host-facing types. Prebuilt global-input backends are not bundled yet. See the repository documentation for the native VM/C ABI and implementation status.
+The package includes the SDK, AOT compiler, CLI, Bun FFI native host, named state/hot reload, shared dynamic lane, and retained native overlay client. Release tarballs are assembled with platform-native runtime and overlay artifacts by the publish workflow.
 
-For deterministic compiler/VM integration testing, the repository also contains the native `spellwire-sim` utility. It is a source-workspace tool and is not bundled as a prebuilt npm binary in this alpha.
+`run` and `watch` compile source in memory and prepare platform permissions before native startup. `watch` only adds control-plane filesystem reload; native realtime dispatch stays callback-free. For deterministic compiler/VM integration testing, the repository also contains `spellwire-sim`.
+
+Detailed guides:
+
+- [Live Native Host Guide](https://github.com/eunhhu/spellwire/blob/main/docs/live-host.md)
+- [Platform Verification Guide](https://github.com/eunhhu/spellwire/blob/main/docs/platform-verification.md)
+- [API Reference](https://github.com/eunhhu/spellwire/blob/main/docs/api.md)

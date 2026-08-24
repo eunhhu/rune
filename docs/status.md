@@ -1,74 +1,57 @@
 # Implementation Status
 
-Spellwire is an early compiler/native-VM MVP. This page separates verified implementation from design intent.
+[한국어](status.ko.md)
 
-## Implemented and tested
+Spellwire is an early alpha with the README implementation plan represented in source. Platform validation remains deliberately separated from implementation.
 
-- complete committed source tree; no post-merge source-generation workflow;
-- public `spellwire` package containing the SDK, compiler, and TypeScript CLI;
-- `create-spellwire` project scaffolder and npm package dry-run coverage;
-- TypeScript AST compiler with source diagnostics;
-- module-scope persistent integer/boolean state;
-- conditions, loops, assignments, updates, and inlined void helper functions;
-- key/mouse output and held-input intrinsics;
-- physical, synthetic, and any-source handler filters;
-- versioned binary encoder/decoder;
-- native program validation;
-- fixed trigger lookup table;
-- bounded native VM stack, locals, output batch, and instruction budget;
-- absolute-deadline synchronous delays;
-- C ABI for engine lifecycle, explicit dispatch, state slots, and output callback batches;
-- deterministic `spellwire-sim` inspector/simulator;
-- JavaScript fallback action sink and SPSC dynamic lane;
-- retained overlay scene/mutation model;
-- Rust and TypeScript unit tests;
-- CI across Linux, macOS, and Windows plus Rust 1.81 and Quick Start smoke tests.
+## Implemented
 
-## Not implemented yet
+- TypeScript AST compiler, source diagnostics, module-scope named integer/boolean state, conditions, loops, updates, inlined helpers, held checks, and key/mouse intrinsics;
+- versioned `SPWR` encoder/decoder and structural/runtime validation;
+- bounded native VM stack, locals, output batch, instruction budget, and fixed trigger table;
+- fixed-capacity continuation scheduler: `sleepUs()` yields until an absolute monotonic deadline without blocking the observer worker;
+- compatibility engine C ABI plus ABI v3 owned-host lifecycle, reload, state, permissions, error, dispatch, and shared input-ring APIs;
+- Bun FFI `NativeHost` with start/stop, `.ts` in-memory compilation, `.bin` manifest loading, serialized watch reload, and state preservation by source name and kind;
+- callback-free `DynamicInputLane` connection from the native observer through a shared six-word SPSC record ring;
+- Windows low-level keyboard/mouse hooks and tagged batched `SendInput` injection;
+- macOS listen-only `CGEventTap`, Input Monitoring/Accessibility checks, private event source, tagged `CGEventPost`, and tap recovery;
+- Linux evdev discovery/hotplug observation and a dedicated uinput keyboard/mouse device;
+- explicit physical/synthetic recursion classification and supported USB HID translation tests;
+- transparent, topmost, click-through retained overlay process with text/rect/line nodes, alpha composition, and mutation-only Bun protocol;
+- VM and native OS-submission percentile benchmark commands;
+- cross-platform CI, Rust 1.81 check, npm dry-runs, and release artifact matrix with checksums and optional Windows/macOS signing plus macOS notarization.
 
-- Windows system-wide observation and `SendInput` host;
-- macOS event-tap observation and CoreGraphics injection host;
-- Linux evdev observation and uinput injection host;
-- a Bun FFI control-plane host with start/stop, hot reload, and named state bindings;
-- non-blocking continuation/deadline scheduling for delayed handlers;
-- native transparent overlay windows/renderers;
-- complete international/vendor-specific key translation;
-- prebuilt native artifacts, signing/notarization, and first npm publication;
-- platform submission-latency benchmarks;
-- physical end-to-end latency measurements.
+## Validation state
 
-## Current capability flag
+| Surface | macOS arm64 | Windows x64 | Linux x64 |
+| --- | --- | --- | --- |
+| Rust/TypeScript unit tests | Passed locally | CI source coverage | CI source coverage |
+| Target compile + Clippy | Passed | Cross-target passed | Cross-target passed |
+| Global observe → VM → inject → observe loopback | Passed | Target-machine run pending | Target-machine run pending |
+| Bun shared dynamic lane | Passed | Target-machine run pending | Target-machine run pending |
+| Native transparent overlay smoke | Passed | Target-machine run pending | Display/compositor run pending |
 
-`spellwire_capabilities()` currently reports only:
+The macOS loopback uses a physical-source F19 dispatch, native F20 injection, tagged synthetic re-observation, and a second VM handler/state update. This is an OS loopback test, not a physical keyboard switch-to-application latency claim.
+
+## Capability bits
+
+`spellwire_capabilities()` returns:
 
 ```text
-HostCallbackInjection
+HostCallbackInjection | NativeObservation | NativeInjection |
+HostLifecycle | NonBlockingDelay
 ```
 
-It does not report `NativeObservation`, `NativeInjection`, or `NativeOverlay`.
+`NativeOverlay` remains a reserved library bit because the renderer is a separately resolved executable. `NativeOverlayRenderer.start()` verifies that companion executable directly.
 
-## Next practical milestone
+## External release gates
 
-A useful live-input milestone should add one host interface shared across platforms while preserving platform-specific implementations:
+These need credentials, hardware, or target machines and cannot be completed by source changes alone:
 
-```text
-start program
-  → platform observer owns event thread
-  → native Runtime dispatch
-  → platform injector submits batches
-  → bounded control channel for stop/state/profile updates
-```
+- actual npm publication and registry propagation;
+- Authenticode/Developer ID signing and Apple notarization with repository secrets;
+- Windows and Linux permission/setup smoke runs;
+- physical switch → HID → OS → target-application latency measurements;
+- Linux overlay behavior on each intended X11/Wayland compositor.
 
-The host should expose capability and permission errors rather than pretending all operating systems have identical behavior.
-
-After one backend works end-to-end, the same benchmark harness should report core dispatch and host submission separately before performance claims are published.
-
-## Merge-readiness definition
-
-This PR is merge-ready only when:
-
-- the actual source is visible in the branch;
-- old bootstrap/shipping workflows are removed;
-- permanent cross-platform CI and package dry-runs are green;
-- the documented Quick Start succeeds from a fresh checkout;
-- docs do not claim direct OS input or overlay rendering that the code does not contain.
+Run and report the target-machine gates with [Platform Verification Guide](platform-verification.md). Use [Live Native Host Guide](live-host.md) when integrating the implemented host APIs into an application.

@@ -1,6 +1,8 @@
-# Runtime verification
+# Runtime Verification
 
-The merged Spellwire source tree is checked with:
+[한국어](runtime-verification.ko.md)
+
+## Portable source gates
 
 ```bash
 bun install --frozen-lockfile
@@ -13,11 +15,36 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo build --workspace --release --locked
 ```
 
-GitHub Actions additionally verifies:
+GitHub Actions repeats Rust tests, Clippy, and release builds on Linux, macOS, and Windows; checks Rust 1.81; verifies both npm tarballs; and runs the compiler → wire format → simulator Quick Start.
 
-- Rust tests, Clippy, and release builds on Linux, macOS, and Windows;
-- Rust 1.81 as the declared MSRV;
-- both npm package tarballs;
-- a Quick Start smoke path that compiles `examples/stateful.spellwire.ts`, inspects the resulting module, and dispatches events through `spellwire-sim` while checking persistent state.
+## Native target gates
 
-The simulator validates the compiler → wire format → native VM path. It does not claim physical switch-to-application latency or global OS hook coverage.
+Run on every release OS after granting platform permissions:
+
+```bash
+bun run build:native
+bun packages/spellwire/src/cli.ts permissions
+bun run test:platform-loopback
+bun run bench:platform -- 10000
+target/release/spellwire-overlay --smoke
+```
+
+Windows uses `target/release/spellwire-overlay.exe`. Linux overlay smoke requires a graphical session. The loopback verifies real native injection, global observation, synthetic classification, second-stage VM execution, and named state access.
+
+[Platform Verification Guide](platform-verification.md) expands these gates into separate macOS, Windows, and Linux procedures, explains expected output, and provides a copyable result report.
+
+## Current local evidence
+
+On macOS arm64, the following passed:
+
+- complete Rust workspace tests/Clippy/release build;
+- TypeScript build and tests;
+- ABI v3 load and permission read through Bun FFI;
+- global tagged F20 injection observed through `CGEventTap` and handled by the synthetic VM trigger;
+- native observer publication into `DynamicInputLane` with zero drops in the smoke scenario;
+- transparent click-through overlay creation at Retina resolution and mutation rendering;
+- native OS-submission benchmark execution.
+
+Windows x64 and Linux x64 backend code also passes local cross-target Clippy. That proves compilation, not live permissions/device/display behavior; target-machine output should be recorded before release.
+
+None of these checks measures physical switch-to-target-application latency. Such a claim needs external timestamped hardware or target-application instrumentation.

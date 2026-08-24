@@ -1,77 +1,79 @@
-# Overlay
+# Native Overlay
 
-The current SDK includes a retained `OverlayScene` data model. It does not create a native window or render pixels yet.
+[한국어](overlay.ko.md)
 
-## Current API
+Spellwire ships a retained scene model and a separate native renderer process. Input dispatch never waits for the renderer or calls JavaScript.
+
+## Use
 
 ```ts
-import { OverlayScene } from "spellwire";
+import { NativeOverlayRenderer, OverlayScene } from "spellwire";
 
 const scene = new OverlayScene();
-
-const latencyId = scene.create({
-  kind: "text",
-  x: 24,
-  y: 24,
-  text: "-- µs",
-  size: 16,
+const panel = scene.create({
+  kind: "rect",
+  x: 20,
+  y: 20,
+  width: 260,
+  height: 72,
+  radius: 14,
+  color: "#121216cc",
 });
-
-scene.update(latencyId, {
+const label = scene.create({
   kind: "text",
-  x: 24,
-  y: 24,
+  x: 42,
+  y: 42,
   text: "42 µs",
-  size: 16,
+  size: 20,
+  color: "#ffffffff",
 });
 
-const mutations = scene.drainMutations();
-const snapshot = scene.snapshot();
-scene.remove(latencyId);
+const renderer = await NativeOverlayRenderer.start();
+await renderer.apply(scene);
+
+scene.update(label, { kind: "text", x: 42, y: 42, text: "38 µs", size: 20 });
+await renderer.apply(scene);
+
+scene.remove(panel);
+await renderer.apply(scene);
+await renderer.close();
 ```
 
-Supported node shapes:
+Nodes support optional `#RRGGBB` or `#RRGGBBAA` colors:
 
 ```ts
 type OverlayNode =
-  | { kind: "text"; x: number; y: number; text: string; size: number }
-  | { kind: "rect"; x: number; y: number; width: number; height: number; radius: number }
-  | { kind: "line"; x1: number; y1: number; x2: number; y2: number; width: number };
+  | { kind: "text"; x: number; y: number; text: string; size: number; color?: string }
+  | { kind: "rect"; x: number; y: number; width: number; height: number; radius: number; color?: string }
+  | { kind: "line"; x1: number; y1: number; x2: number; y2: number; width: number; color?: string };
 ```
 
-Every create/update/remove operation records a monotonically increasing revision and a mutation. A host renderer can drain mutations or request a complete snapshot.
+`create`, `update`, and `remove` append monotonically revised mutations. `apply()` drains only those mutations; a static scene causes no JavaScript per-frame callback.
 
-The current implementation uses normal JavaScript `Map`, arrays, and `structuredClone`; it belongs to the Bun control plane, not to native input dispatch.
+## Process protocol and isolation
 
-## Renderer contract
+`NativeOverlayRenderer` resolves `spellwire-overlay` from the npm platform directory, `SPELLWIRE_OVERLAY_EXECUTABLE`, or a workspace release/debug build. It starts the renderer with piped stdin and waits for a JSON `ready` message. Newline-delimited commands are `upsert`, `remove`, `clear`, `show`, `hide`, and `exit`.
 
-A future renderer should consume scene mutations/snapshots on a dedicated native thread:
+The native process:
 
-```text
-Bun scene update
-    → build/publish retained scene state
-        → native render thread
+- owns the main-thread winit event loop and wgpu surface;
+- retains nodes in a native ordered map;
+- rasterizes text/rect/line nodes only after mutations;
+- uploads a premultiplied RGBA frame and presents it on a transparent surface;
+- requests topmost and click-through behavior;
+- runs independently of the native input observer/runtime worker.
+
+Renderer failure therefore does not stop input execution. The renderer currently covers the primary monitor; multi-monitor scene routing is not yet exposed.
+
+## Smoke test
+
+```bash
+bun run build:native
+target/release/spellwire-overlay --smoke
 ```
 
-The input VM must not take an overlay lock, wait for a frame, or invoke JavaScript while dispatching an event. Overlay failure must not stop input execution.
+Success prints one `ready` JSON object containing surface dimensions and alpha mode, then exits. On Linux this command requires a working graphical session and must be repeated for every supported compositor.
 
-## Planned platform direction
+## Performance scope
 
-- Windows: transparent click-through topmost window with DirectComposition/Direct2D/DirectWrite.
-- macOS: non-activating transparent panel with Core Animation/Core Text or Metal.
-- Linux X11: ARGB window with an EGL-backed renderer.
-- Linux Wayland: capability-based layer-shell support where the compositor provides it.
-
-These are design directions, not current implementation claims.
-
-## Performance gate
-
-Before native overlay support is advertised, measurements should include:
-
-- idle CPU and resident memory for a static text node;
-- scene publication time;
-- render p50/p95/p99;
-- cost at 100, 1,000, and 10,000 primitives;
-- native input dispatch p99 with overlay disabled and enabled.
-
-The last comparison is mandatory: enabling a static overlay must not measurably worsen input dispatch jitter.
+The implementation removes overlay work from the realtime worker, but no universal compositor-latency claim is made. Release profiling should report idle CPU/RSS, mutation publication time, render percentiles at representative primitive counts, and input p99 with the overlay disabled/enabled.
