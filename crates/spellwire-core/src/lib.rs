@@ -14,7 +14,8 @@ pub use model::{
 };
 pub use program::{Handler, HandlerTable, MatchingHandlers, Program, ProgramError};
 pub use vm::{
-    validate_program, DispatchError, DispatchReport, Injector, InputState, Runtime, RuntimeConfig,
-    VmError, VmScratch, MAX_LOCALS, MAX_OUTPUT_BATCH, MAX_STACK,
+    validate_program, ContinuationScheduler, DispatchError, DispatchReport, Injector, InputState,
+    PollReport, Runtime, RuntimeConfig, SchedulerFull, VmError, VmScratch,
+    DEFAULT_MAX_CONTINUATIONS, MAX_LOCALS, MAX_OUTPUT_BATCH, MAX_STACK,
 };
 pub use wire::DecodeError;

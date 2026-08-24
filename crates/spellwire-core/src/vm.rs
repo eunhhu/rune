@@ -12,6 +12,7 @@ use crate::{
 pub const MAX_STACK: usize = 256;
 pub const MAX_LOCALS: usize = 256;
 pub const MAX_OUTPUT_BATCH: usize = 64;
+pub const DEFAULT_MAX_CONTINUATIONS: usize = 64;
 
 pub trait Injector {
     type Error;
@@ -98,6 +99,34 @@ pub struct DispatchReport {
     pub output_events: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PollReport {
+    pub completed_handlers: u16,
+    pub instructions: u32,
+    pub output_events: u32,
+    pub pending_handlers: u16,
+    pub next_deadline: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SchedulerFull {
+    pub capacity: usize,
+    pub pending: usize,
+    pub requested: usize,
+}
+
+impl fmt::Display for SchedulerFull {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "continuation scheduler is full (capacity {}, pending {}, requested {})",
+            self.capacity, self.pending, self.requested
+        )
+    }
+}
+
+impl std::error::Error for SchedulerFull {}
+
 #[derive(Debug, Clone)]
 pub struct InputState {
     keyboard: [u64; 4],
@@ -160,6 +189,67 @@ pub struct VmScratch {
     locals: [i64; MAX_LOCALS],
     output: [OutputEvent; MAX_OUTPUT_BATCH],
     output_len: usize,
+}
+
+struct ExecutionCursor {
+    handler_id: u16,
+    event: InputEvent,
+    pc: u32,
+    instructions: u32,
+    output_events: u32,
+    deadline: Instant,
+}
+
+impl ExecutionCursor {
+    fn new(handler_id: u16, event: InputEvent, entry: u32, now: Instant) -> Self {
+        Self { handler_id, event, pc: entry, instructions: 0, output_events: 0, deadline: now }
+    }
+}
+
+struct Continuation {
+    cursor: ExecutionCursor,
+    scratch: VmScratch,
+}
+
+/// Fixed-capacity queue for handlers suspended at `sleepUs()` deadlines.
+///
+/// The host owns one scheduler per runtime and calls [`Runtime::poll_ready`] whenever input
+/// arrives or the next deadline expires. This keeps the observation thread free of VM sleeps.
+pub struct ContinuationScheduler {
+    pending: Vec<Continuation>,
+    capacity: usize,
+}
+
+impl ContinuationScheduler {
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self { pending: Vec::with_capacity(capacity), capacity }
+    }
+
+    #[must_use]
+    pub fn pending(&self) -> usize {
+        self.pending.len()
+    }
+
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    #[must_use]
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.pending.iter().map(|continuation| continuation.cursor.deadline).min()
+    }
+
+    pub fn clear(&mut self) {
+        self.pending.clear();
+    }
+}
+
+impl Default for ContinuationScheduler {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_CONTINUATIONS)
+    }
 }
 
 impl VmScratch {
@@ -284,8 +374,24 @@ impl Runtime {
         let Runtime { program, handlers, state, input_state, config } = self;
         for handler_id in handlers.matching(event) {
             let entry = program.handlers[usize::from(handler_id)].entry;
-            let execution =
-                execute(program, entry, event, input_state, state, injector, scratch, *config);
+            scratch.reset(usize::from(program.local_count));
+            let mut cursor = ExecutionCursor::new(handler_id, event, entry, Instant::now());
+            let execution = loop {
+                match execute_until_yield(
+                    program,
+                    input_state,
+                    state,
+                    injector,
+                    scratch,
+                    &mut cursor,
+                ) {
+                    Ok(ExecutionStep::Complete(report)) => break Ok(report),
+                    Ok(ExecutionStep::Yield(deadline)) => {
+                        wait_until(deadline, config.spin_threshold);
+                    }
+                    Err(error) => break Err(error),
+                }
+            };
             let execution = match execution {
                 Ok(value) => value,
                 Err(ExecutionFailure::Vm(source)) => {
@@ -301,11 +407,113 @@ impl Runtime {
         }
         Ok(report)
     }
+
+    /// Records an input event and queues all matching handlers without waiting for `sleepUs()`.
+    ///
+    /// Queue insertion is all-or-nothing. Input held-state is still updated if the queue is full,
+    /// because the physical transition already happened before the host observed it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SchedulerFull`] if every matching handler cannot fit.
+    pub fn enqueue(
+        &mut self,
+        event: InputEvent,
+        scheduler: &mut ContinuationScheduler,
+        now: Instant,
+    ) -> Result<u16, SchedulerFull> {
+        self.input_state.apply(event);
+        let handler_count = self.handlers.matching(event).count();
+        let available = scheduler.capacity.saturating_sub(scheduler.pending.len());
+        if handler_count > available {
+            return Err(SchedulerFull {
+                capacity: scheduler.capacity,
+                pending: scheduler.pending.len(),
+                requested: handler_count,
+            });
+        }
+
+        for handler_id in self.handlers.matching(event) {
+            let entry = self.program.handlers[usize::from(handler_id)].entry;
+            let mut scratch = VmScratch::new();
+            scratch.reset(usize::from(self.program.local_count));
+            scheduler.pending.push(Continuation {
+                cursor: ExecutionCursor::new(handler_id, event, entry, now),
+                scratch,
+            });
+        }
+        Ok(u16::try_from(handler_count).unwrap_or(u16::MAX))
+    }
+
+    /// Runs every continuation whose absolute deadline is at or before `now`.
+    ///
+    /// Zero-duration delays continue in the same poll. A yielded handler remains queued; a
+    /// completed or failed handler is removed. The returned next deadline lets a host block its
+    /// event loop without polling.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first VM or injector error. Other pending continuations remain scheduled.
+    pub fn poll_ready<I: Injector>(
+        &mut self,
+        scheduler: &mut ContinuationScheduler,
+        now: Instant,
+        injector: &mut I,
+    ) -> Result<PollReport, DispatchError<I::Error>> {
+        let mut report = PollReport::default();
+        let mut index = 0;
+        while index < scheduler.pending.len() {
+            if scheduler.pending[index].cursor.deadline > now {
+                index += 1;
+                continue;
+            }
+
+            let continuation = &mut scheduler.pending[index];
+            let step = execute_until_yield(
+                &self.program,
+                &self.input_state,
+                &mut self.state,
+                injector,
+                &mut continuation.scratch,
+                &mut continuation.cursor,
+            );
+            match step {
+                Ok(ExecutionStep::Complete(execution)) => {
+                    report.completed_handlers = report.completed_handlers.saturating_add(1);
+                    report.instructions =
+                        report.instructions.saturating_add(execution.instructions);
+                    report.output_events =
+                        report.output_events.saturating_add(execution.output_events);
+                    scheduler.pending.remove(index);
+                }
+                Ok(ExecutionStep::Yield(deadline)) if deadline <= now => {}
+                Ok(ExecutionStep::Yield(_)) => index += 1,
+                Err(ExecutionFailure::Vm(source)) => {
+                    let handler_id = continuation.cursor.handler_id;
+                    scheduler.pending.remove(index);
+                    return Err(DispatchError::Vm { handler_id, source });
+                }
+                Err(ExecutionFailure::Inject(source)) => {
+                    let handler_id = continuation.cursor.handler_id;
+                    scheduler.pending.remove(index);
+                    return Err(DispatchError::Inject { handler_id, source });
+                }
+            }
+        }
+        report.pending_handlers = u16::try_from(scheduler.pending.len()).unwrap_or(u16::MAX);
+        report.next_deadline = scheduler.next_deadline();
+        Ok(report)
+    }
 }
 
 struct ExecutionReport {
     instructions: u32,
     output_events: u32,
+}
+
+enum ExecutionStep {
+    Complete(ExecutionReport),
+    Yield(Instant),
 }
 
 enum ExecutionFailure<E> {
@@ -315,37 +523,28 @@ enum ExecutionFailure<E> {
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)] // Keeping the opcode dispatch in one match makes VM semantics auditable.
-fn execute<I: Injector>(
+fn execute_until_yield<I: Injector>(
     program: &Program,
-    entry: u32,
-    event: InputEvent,
     input_state: &InputState,
     state: &mut [i64],
     injector: &mut I,
     scratch: &mut VmScratch,
-    config: RuntimeConfig,
-) -> Result<ExecutionReport, ExecutionFailure<I::Error>> {
-    let local_count = usize::from(program.local_count);
+    cursor: &mut ExecutionCursor,
+) -> Result<ExecutionStep, ExecutionFailure<I::Error>> {
     let stack_limit = usize::from(program.stack_limit);
-    scratch.reset(local_count);
-
-    let mut pc = entry;
-    let mut instructions = 0_u32;
-    let mut output_events = 0_u32;
-    let mut deadline = Instant::now();
 
     loop {
-        if instructions >= program.instruction_budget {
+        if cursor.instructions >= program.instruction_budget {
             return Err(ExecutionFailure::Vm(VmError::InstructionBudgetExceeded(
                 program.instruction_budget,
             )));
         }
         let instruction = *program
             .code
-            .get(pc as usize)
-            .ok_or(ExecutionFailure::Vm(VmError::InvalidProgramCounter(pc)))?;
-        instructions += 1;
-        pc = pc.saturating_add(1);
+            .get(cursor.pc as usize)
+            .ok_or(ExecutionFailure::Vm(VmError::InvalidProgramCounter(cursor.pc)))?;
+        cursor.instructions += 1;
+        cursor.pc = cursor.pc.saturating_add(1);
 
         macro_rules! pop {
             () => {
@@ -368,7 +567,10 @@ fn execute<I: Injector>(
         match instruction.opcode {
             Opcode::Halt => {
                 scratch.flush(injector).map_err(ExecutionFailure::Inject)?;
-                break;
+                return Ok(ExecutionStep::Complete(ExecutionReport {
+                    instructions: cursor.instructions,
+                    output_events: cursor.output_events,
+                }));
             }
             Opcode::PushConst => push!(instruction.immediate),
             Opcode::LoadState => push!(state[usize::from(instruction.a)]),
@@ -421,19 +623,20 @@ fn execute<I: Injector>(
             Opcode::Shr => {
                 binary!(|left: i64, right: i64| left.wrapping_shr(shift_amount(right)));
             }
-            Opcode::Jump => pc = instruction.b,
+            Opcode::Jump => cursor.pc = instruction.b,
             Opcode::JumpIfFalse => {
                 if pop!() == 0 {
-                    pc = instruction.b;
+                    cursor.pc = instruction.b;
                 }
             }
-            Opcode::LoadInputCode => push!(i64::from(event.code)),
-            Opcode::LoadInputEdge => push!(event.edge as i64),
-            Opcode::LoadInputSource => push!(event.source as i64),
+            Opcode::LoadInputCode => push!(i64::from(cursor.event.code)),
+            Opcode::LoadInputEdge => push!(cursor.event.edge as i64),
+            Opcode::LoadInputSource => push!(cursor.event.source as i64),
             Opcode::LoadHeld => {
                 let device_bits = instruction.flags & !crate::FLAG_STACK_OPERANDS;
-                let device = InputDevice::try_from(device_bits)
-                    .map_err(|()| ExecutionFailure::Vm(VmError::InvalidProgramCounter(pc - 1)))?;
+                let device = InputDevice::try_from(device_bits).map_err(|()| {
+                    ExecutionFailure::Vm(VmError::InvalidProgramCounter(cursor.pc - 1))
+                })?;
                 let code = if instruction.flags & crate::FLAG_STACK_OPERANDS != 0 {
                     let raw_code = pop!();
                     u16::try_from(raw_code)
@@ -455,7 +658,7 @@ fn execute<I: Injector>(
                 scratch
                     .queue(OutputEvent::Key { code, down }, injector)
                     .map_err(ExecutionFailure::Inject)?;
-                output_events = output_events.saturating_add(1);
+                cursor.output_events = cursor.output_events.saturating_add(1);
             }
             Opcode::MouseDown | Opcode::MouseUp => {
                 let raw_button = if instruction.flags & crate::FLAG_STACK_OPERANDS != 0 {
@@ -471,7 +674,7 @@ fn execute<I: Injector>(
                 scratch
                     .queue(OutputEvent::MouseButton { button, down }, injector)
                     .map_err(ExecutionFailure::Inject)?;
-                output_events = output_events.saturating_add(1);
+                cursor.output_events = cursor.output_events.saturating_add(1);
             }
             Opcode::MouseMove | Opcode::MouseWheel => {
                 let (x, y) = if instruction.flags & crate::FLAG_STACK_OPERANDS != 0 {
@@ -491,7 +694,7 @@ fn execute<I: Injector>(
                     OutputEvent::MouseWheel { x, y }
                 };
                 scratch.queue(output, injector).map_err(ExecutionFailure::Inject)?;
-                output_events = output_events.saturating_add(1);
+                cursor.output_events = cursor.output_events.saturating_add(1);
             }
             Opcode::DelayUs => {
                 let raw_delay = if instruction.flags & crate::FLAG_STACK_OPERANDS != 0 {
@@ -502,15 +705,14 @@ fn execute<I: Injector>(
                 let delay = u32::try_from(raw_delay)
                     .map_err(|_| ExecutionFailure::Vm(VmError::InvalidDelay(raw_delay)))?;
                 scratch.flush(injector).map_err(ExecutionFailure::Inject)?;
-                deadline = deadline
+                cursor.deadline = cursor
+                    .deadline
                     .checked_add(Duration::from_micros(u64::from(delay)))
                     .unwrap_or_else(Instant::now);
-                wait_until(deadline, config.spin_threshold);
+                return Ok(ExecutionStep::Yield(cursor.deadline));
             }
         }
     }
-
-    Ok(ExecutionReport { instructions, output_events })
 }
 
 fn unpack_pair(value: i64) -> (i32, i32) {
@@ -707,5 +909,97 @@ mod tests {
         let error = runtime.dispatch(event, &mut injector, &mut scratch).unwrap_err();
         assert!(matches!(error, DispatchError::Vm { source: VmError::InvalidDelay(-1), .. }));
         assert!(injector.0.is_empty());
+    }
+
+    #[test]
+    fn continuation_scheduler_yields_without_blocking_and_resumes_at_deadline() {
+        let program = Program {
+            initial_state: Box::new([]),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::Q,
+                    edge: Edge::Down,
+                    source: SourceFilter::Physical,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![
+                Instruction::new(Opcode::KeyDown).with_a(key::E),
+                Instruction::new(Opcode::DelayUs).with_b(10_000),
+                Instruction::new(Opcode::KeyUp).with_a(key::E),
+                Instruction::new(Opcode::Halt),
+            ]
+            .into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 8,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let mut scheduler = ContinuationScheduler::default();
+        let mut injector = RecordingInjector::default();
+        let now = Instant::now();
+        let event = InputEvent {
+            device: InputDevice::Keyboard,
+            code: key::Q,
+            edge: Edge::Down,
+            source: InputSource::Physical,
+        };
+
+        assert_eq!(runtime.enqueue(event, &mut scheduler, now).unwrap(), 1);
+        let first = runtime.poll_ready(&mut scheduler, now, &mut injector).unwrap();
+        assert_eq!(first.completed_handlers, 0);
+        assert_eq!(first.pending_handlers, 1);
+        assert_eq!(first.next_deadline, Some(now + Duration::from_millis(10)));
+        assert_eq!(injector.0, vec![OutputEvent::Key { code: key::E, down: true }]);
+
+        let early = runtime
+            .poll_ready(&mut scheduler, now + Duration::from_micros(9_999), &mut injector)
+            .unwrap();
+        assert_eq!(early.completed_handlers, 0);
+        assert_eq!(injector.0.len(), 1);
+
+        let complete = runtime
+            .poll_ready(&mut scheduler, now + Duration::from_millis(10), &mut injector)
+            .unwrap();
+        assert_eq!(complete.completed_handlers, 1);
+        assert_eq!(complete.pending_handlers, 0);
+        assert_eq!(complete.instructions, 4);
+        assert_eq!(injector.0[1], OutputEvent::Key { code: key::E, down: false });
+    }
+
+    #[test]
+    fn full_scheduler_rejects_all_new_handlers_but_tracks_input_state() {
+        let program = Program {
+            initial_state: Box::new([]),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::Q,
+                    edge: Edge::Down,
+                    source: SourceFilter::Physical,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![Instruction::new(Opcode::Halt)].into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 8,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let mut scheduler = ContinuationScheduler::new(0);
+        let event = InputEvent {
+            device: InputDevice::Keyboard,
+            code: key::Q,
+            edge: Edge::Down,
+            source: InputSource::Physical,
+        };
+
+        let error = runtime.enqueue(event, &mut scheduler, Instant::now()).unwrap_err();
+        assert_eq!(error, SchedulerFull { capacity: 0, pending: 0, requested: 1 });
+        assert!(runtime.input_state.held(InputDevice::Keyboard, key::Q));
+        assert_eq!(scheduler.pending(), 0);
     }
 }
