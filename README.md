@@ -2,51 +2,23 @@
 
 Rune is a native realtime input automation runtime with a TypeScript scripting SDK.
 
-TypeScript describes macros, but **TypeScript never runs on the realtime input hot path**. A script is evaluated once, compiled into a compact versioned program, and loaded into a Rust runtime that observes, matches, schedules, and injects input natively.
+TypeScript is the authoring language, but latency-sensitive handlers do **not** run as JavaScript callbacks on every input event. Rune supports both a simple macro builder and a stateful realtime TypeScript subset compiled into a native Rust VM.
 
-> Rune is an early MVP. The realtime input runtime is implemented; the retained native overlay renderer is designed but not implemented yet.
+> Early MVP. Input runtime and stateful RT execution are the current focus; the native overlay renderer is still under construction.
 
-## Why Rune exists
+## Quick Start
 
-Most desktop automation libraries optimize for convenience. Rune optimizes for predictable low latency and low jitter:
+Requirements: Bun 1.3.14+ and Rust 1.81+.
 
-- no JavaScript callbacks per input event
-- no allocation in trigger lookup or VM execution
-- no async runtime on the input thread
-- fixed-size trigger lookup tables
-- batched zero-delay output sequences
-- absolute monotonic deadlines with an optional spin tail
-- direct OS input APIs instead of a generic automation dependency
-
-## Architecture
-
-```text
-macro.ts                         control plane
-   │
-   ├─ @rune/sdk builder callback runs once
-   ├─ emits versioned RUNE binary IR
-   └─ Bun FFI loads the IR
-              │
-              ▼
-       rune-native / Rust        realtime plane
-   ┌──────────────────────────────────────────┐
-   │ native observer → trigger LUT → VM       │
-   │                         │                │
-   │                         └→ native inject │
-   └──────────────────────────────────────────┘
+```bash
+git clone https://github.com/eunhhu/rune.git
+cd rune
+bun install
+cargo build -p rune-native --release
+bun run example:lunge
 ```
 
-The intended platform path is direct and small:
-
-| Platform | Observe | Inject | MVP status |
-| --- | --- | --- | --- |
-| Windows | Raw Input | SendInput | implemented |
-| macOS | CGEventTap | CGEventPost | implemented |
-| Linux | evdev | uinput | implemented |
-
-The backends share USB HID key identifiers, so scripts do not contain Windows scan codes, macOS virtual key codes, or Linux input-event codes.
-
-## Example
+Or create `macro.ts`:
 
 ```ts
 import { Key, MouseButton, macro, rune } from "@rune/sdk";
@@ -61,65 +33,113 @@ const lunge = macro("lunge", (m) => {
   );
 });
 
-rune.configure({ spinThresholdUs: 100 }).load(lunge).start();
+rune.load(lunge).start();
 ```
 
-The callback passed to `macro()` is a compile-time builder. It is not retained and is never invoked when Q is pressed.
+```bash
+bun macro.ts
+```
 
-Other compile-time helpers can expand into the same flat native program:
+Full setup, permissions, and first-run instructions: **[Quick Start](docs/quick-start.md)**.
+
+## Stateful realtime TypeScript
+
+The reason Rune uses TypeScript is not only syntax. Stateful macros can keep variables across events and use conditions, loops, and functions while still avoiding JS execution on the input hot path.
 
 ```ts
-const burst = macro("burst", (m) => {
-  m.on.mouseDown(MouseButton.Back).run(
-    m.repeat(3, m.mouse.click(MouseButton.Left), m.delay.us(75)),
-  );
+import { Key, delay, held, key, on, rt } from "@rune/sdk";
+
+rt.load(() => {
+  let combo = 0;
+
+  function burst(count: number) {
+    for (let i = 0; i < count; i++) {
+      key.tap(Key.E);
+      delay.us(40);
+    }
+  }
+
+  on.keyDown(Key.Q, () => {
+    combo++;
+
+    if (combo >= 3 && held(Key.LeftShift)) {
+      burst(2);
+      combo = 0;
+    }
+  });
 });
 ```
 
-## Repository layout
+`combo`, the branch, the loop, and the function execute in Rune's native VM. Bun remains the unrestricted control plane for configuration, networking, disk I/O, UI state, plugins, and hot reload.
+
+Read **[TypeScript Runtime](docs/typescript-runtime.md)** for the execution model and supported subset.
+
+## Architecture
 
 ```text
-crates/rune-core/    IR decoder, trigger table, VM, deadline scheduler
-crates/rune-native/  C ABI plus Windows/macOS/Linux input backends
-crates/rune-bench/   dependency-free core dispatch percentile benchmark
-packages/sdk/        TypeScript DSL, encoder, and Bun FFI control plane
-examples/            runnable Rune scripts
-docs/                architecture, platform, and overlay design notes
+Bun / TypeScript application
+   │
+   ├─ normal TS                configuration / I/O / UI / plugins
+   │
+   ├─ macro(...)              compile-time flat native program
+   │
+   └─ rt.load(...)            stateful TS → native bytecode
+                               │
+                               ▼
+                       Rust realtime runtime
+                 ┌───────────────────────────────┐
+physical input → │ trigger LUT → VM → injection │ → OS input stream
+                 └───────────────────────────────┘
 ```
 
+The intended hot path has no per-event JavaScript callback, Promise, async runtime, or hash-table lookup.
+
+## Platform backends
+
+| Platform | Observe | Inject | Status |
+| --- | --- | --- | --- |
+| Windows | native global input backend | `SendInput` | MVP |
+| macOS | `CGEventTap` | `CGEventPost` | MVP |
+| Linux | evdev | uinput | MVP |
+
+Scripts use Rune/USB-HID-style key identifiers instead of platform-specific scan codes.
+
+See **[Platform Notes](docs/platforms.md)** for permissions and limitations.
+
+## Documentation
+
+- [Quick Start](docs/quick-start.md) — fresh clone to first macro
+- [API Reference](docs/api.md) — macro builder, runtime, keys, mouse
+- [TypeScript Runtime](docs/typescript-runtime.md) — persistent state, conditions, loops, functions
+- [Architecture](docs/architecture.md) — control plane vs realtime plane
+- [Platform Notes](docs/platforms.md) — Windows/macOS/Linux backends
+- [Overlay](docs/overlay.md) — retained native overlay design
+- [Troubleshooting](docs/troubleshooting.md) — permissions, native loading, timing issues
+- [Status](docs/status.md) — implemented vs not-yet-claimed features
+
 ## Development
-
-Requirements:
-
-- Rust 1.81 or newer
-- Bun 1.3.14 or newer
 
 ```bash
 bun install
 cargo test --workspace
+cargo build -p rune-native --release
 bun run typecheck
 bun run test:ts
-cargo build -p rune-native --release
-bun run example:lunge
 ```
 
-The SDK searches `target/release`, `target/debug`, and packaged native-artifact directories. `RUNE_NATIVE_PATH` can point at an explicit `.dll`, `.dylib`, or `.so`.
-
-On Linux, reading `/dev/input/event*` and creating `/dev/uinput` requires explicit permission. See [`docs/platforms.md`](docs/platforms.md) before running Rune.
-
-## Benchmarking
+Run the native core benchmark:
 
 ```bash
-cargo run -p rune-bench --release -- 1000000
+bun run bench
 ```
 
-The bundled benchmark measures only native trigger lookup, VM execution, and a null injector. It deliberately does not claim switch-to-application latency; USB polling, OS scheduling, the platform injection API, and target-application polling are separate parts of that path.
+Rune does not currently claim a guaranteed physical-switch-to-application microsecond latency. Performance work is measured at the framework boundary using percentile/jitter distributions; USB polling, OS scheduling, and target-application polling are outside that boundary.
 
-## Overlay status
+## Overlay
 
-The overlay is deliberately isolated from input execution. The design is a retained native scene with immutable snapshots handed to a platform render thread, never per-frame JavaScript draw callbacks. See [`docs/overlay.md`](docs/overlay.md).
+The overlay is isolated from input execution and is designed as a retained native scene handed to a dedicated renderer thread. Rune will not introduce Electron/webview rendering into the realtime runtime just for convenience.
 
-The first input-runtime MVP does **not** advertise the overlay capability yet. That avoids quietly replacing the zero-cost design with Electron, a webview, or a heavyweight cross-platform GUI stack.
+See [Overlay](docs/overlay.md).
 
 ## License
 
