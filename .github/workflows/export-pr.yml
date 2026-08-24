@@ -2,7 +2,6 @@ name: Export source snapshot for conflict resolution
 
 on:
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
