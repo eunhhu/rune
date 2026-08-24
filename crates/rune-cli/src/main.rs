@@ -56,7 +56,8 @@ fn run() -> Result<(), String> {
             inspect(&path)
         }
         "simulate" => {
-            let path = args.next().ok_or_else(|| "simulate requires a .rune.bin path".to_owned())?;
+            let path =
+                args.next().ok_or_else(|| "simulate requires a .rune.bin path".to_owned())?;
             simulate(&path, args.collect())
         }
         _ => Err(format!("unknown command {command:?}")),
@@ -132,9 +133,9 @@ fn simulate(path: &str, event_specs: Vec<String>) -> Result<(), String> {
 fn parse_event(raw: &str) -> Result<InputEvent, String> {
     let mut parts = raw.split(':');
     let kind = parts.next().unwrap_or_default().to_ascii_lowercase();
-    let code = parts.next().ok_or_else(|| {
-        format!("event {raw:?} needs a code, for example key-down:Q")
-    })?;
+    let code = parts
+        .next()
+        .ok_or_else(|| format!("event {raw:?} needs a code, for example key-down:Q"))?;
     let source = parts.next().map(parse_source).transpose()?.unwrap_or(InputSource::Physical);
     if parts.next().is_some() {
         return Err(format!("event {raw:?} has too many ':' fields"));
@@ -248,9 +249,9 @@ fn parse_mouse_button(raw: &str) -> Result<MouseButton, String> {
         "2" | "middle" => Ok(MouseButton::Middle),
         "3" | "back" => Ok(MouseButton::Back),
         "4" | "forward" => Ok(MouseButton::Forward),
-        _ => Err(format!(
-            "unknown mouse button {raw:?}; use left, right, middle, back, or forward"
-        )),
+        _ => {
+            Err(format!("unknown mouse button {raw:?}; use left, right, middle, back, or forward"))
+        }
     }
 }
 
@@ -299,16 +300,12 @@ fn format_input(event: InputEvent) -> String {
 fn format_output(event: &OutputEvent) -> String {
     match *event {
         OutputEvent::Empty => "empty".to_owned(),
-        OutputEvent::Key { code, down } => format!(
-            "key-{}:{}",
-            if down { "down" } else { "up" },
-            format_key(code)
-        ),
-        OutputEvent::MouseButton { button, down } => format!(
-            "mouse-{}:{}",
-            if down { "down" } else { "up" },
-            format_mouse_button(button)
-        ),
+        OutputEvent::Key { code, down } => {
+            format!("key-{}:{}", if down { "down" } else { "up" }, format_key(code))
+        }
+        OutputEvent::MouseButton { button, down } => {
+            format!("mouse-{}:{}", if down { "down" } else { "up" }, format_mouse_button(button))
+        }
         OutputEvent::MouseMove { dx, dy } => format!("mouse-move:{dx}:{dy}"),
         OutputEvent::MouseWheel { x, y } => format!("mouse-wheel:{x}:{y}"),
     }
