@@ -28,6 +28,27 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
+      - name: Verify release versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          spellwire_version="$(node -p "require('./packages/spellwire/package.json').version")"
+          create_version="$(node -p "require('./packages/create-spellwire/package.json').version")"
+
+          if [ "${spellwire_version}" != "${create_version}" ]; then
+            echo "::error::Package versions differ: spellwire=${spellwire_version}, create-spellwire=${create_version}."
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            if [ "${tag_version}" != "${spellwire_version}" ]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match package version ${spellwire_version}."
+              exit 1
+            fi
+          fi
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 

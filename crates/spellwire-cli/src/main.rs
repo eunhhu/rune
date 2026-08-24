@@ -59,7 +59,8 @@ fn run() -> Result<(), String> {
         "simulate" => {
             let path =
                 args.next().ok_or_else(|| "simulate requires a .spellwire.bin path".to_owned())?;
-            simulate(&path, args.collect())
+            let event_specs = args.collect::<Vec<_>>();
+            simulate(&path, &event_specs)
         }
         _ => Err(format!("unknown command {command:?}")),
     }
@@ -87,7 +88,7 @@ fn inspect(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn simulate(path: &str, event_specs: Vec<String>) -> Result<(), String> {
+fn simulate(path: &str, event_specs: &[String]) -> Result<(), String> {
     if event_specs.is_empty() {
         return Err("simulate requires at least one event, for example key-down:Q".to_owned());
     }
@@ -257,11 +258,7 @@ fn parse_mouse_button(raw: &str) -> Result<MouseButton, String> {
 }
 
 fn normalize(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
+    value.chars().filter(char::is_ascii_alphanumeric).flat_map(char::to_lowercase).collect()
 }
 
 fn format_trigger(trigger: Trigger) -> String {
@@ -353,8 +350,7 @@ fn format_key(code: u16) -> String {
 
 fn format_mouse_code(code: u16) -> String {
     MouseButton::try_from(u8::try_from(code).unwrap_or(u8::MAX))
-        .map(format_mouse_button)
-        .unwrap_or_else(|()| code.to_string())
+        .map_or_else(|()| code.to_string(), format_mouse_button)
 }
 
 fn format_mouse_button(button: MouseButton) -> String {

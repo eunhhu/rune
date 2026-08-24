@@ -43,6 +43,12 @@ impl fmt::Display for DecodeError {
 impl std::error::Error for DecodeError {}
 
 impl Program {
+    /// Decodes a complete versioned Spellwire bytecode buffer into owned program data.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeError`] for malformed headers, unsupported versions, invalid enum values,
+    /// truncated sections, size overflow, or trailing bytes.
     pub fn decode(bytes: &[u8]) -> Result<Self, DecodeError> {
         let mut reader = Reader::new(bytes);
         if reader.take(4)? != WIRE_MAGIC {

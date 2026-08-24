@@ -84,6 +84,12 @@ pub struct HandlerTable {
 }
 
 impl HandlerTable {
+    /// Builds the fixed trigger lookup table for a validated handler list.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProgramError`] when the list is empty, exceeds wire-format limits, contains an
+    /// invalid trigger, or places too many handlers in one trigger bucket.
     pub fn build(handlers: &[Handler]) -> Result<Self, ProgramError> {
         if handlers.is_empty() {
             return Err(ProgramError::NoHandlers);
@@ -100,7 +106,9 @@ impl HandlerTable {
             if lists[slot].len() == usize::from(u16::MAX) {
                 return Err(ProgramError::TooManyHandlersForTrigger(handler.trigger));
             }
-            lists[slot].push(handler_id as u16);
+            let handler_id = u16::try_from(handler_id)
+                .map_err(|_| ProgramError::TooManyHandlers(handlers.len()))?;
+            lists[slot].push(handler_id);
         }
 
         let total = lists.iter().map(Vec::len).sum();
@@ -109,7 +117,11 @@ impl HandlerTable {
         for (slot, ids) in lists.into_iter().enumerate() {
             let start = handler_ids.len();
             handler_ids.extend(ids);
-            buckets[slot] = Bucket { start: start as u32, len: (handler_ids.len() - start) as u16 };
+            let bucket_start =
+                u32::try_from(start).map_err(|_| ProgramError::TooManyHandlers(handlers.len()))?;
+            let bucket_len = u16::try_from(handler_ids.len() - start)
+                .map_err(|_| ProgramError::TooManyHandlers(handlers.len()))?;
+            buckets[slot] = Bucket { start: bucket_start, len: bucket_len };
         }
 
         Ok(Self {

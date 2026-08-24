@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Key, MouseButton } from "../src/index";
-import { compileSource, Opcode, SpellwireCompileError } from "../src/index";
+import { compileSource, Opcode, SourceFilter, SpellwireCompileError } from "../src/index";
 
 const stateful = `
 import { Key, MouseButton, clickMouse, keyDown, keyUp, rt, sleepUs } from "../src/index";
@@ -56,5 +56,79 @@ describe("Spellwire TypeScript AOT compiler", () => {
       rt.onKeyDown(Key.Q, () => { if (object.value) {} });
     `;
     expect(() => compileSource(source)).toThrow(SpellwireCompileError);
+  });
+
+  test("rejects TypeScript syntax errors before lowering handlers", () => {
+    const source = `
+      import { Key, rt } from "../src/index";
+      rt.onKeyDown(Key.Q, () => {});
+    }`;
+    expect(() => compileSource(source)).toThrow(SpellwireCompileError);
+  });
+
+  test("resolves shorthand, quoted, and computed source options", () => {
+    const shorthand = compileSource(`
+      import { InputSource, Key, rt } from "../src/index";
+      const source = InputSource.Synthetic;
+      rt.onKeyDown(Key.Q, () => {}, { source });
+    `);
+    const quoted = compileSource(`
+      import { InputSource, Key, rt } from "../src/index";
+      rt.onKeyDown(Key.Q, () => {}, { "source": InputSource.Any });
+    `);
+    const computed = compileSource(`
+      import { InputSource, Key, rt } from "../src/index";
+      rt.onKeyDown(Key.Q, () => {}, { ["source"]: InputSource.Physical });
+    `);
+
+    expect(shorthand.module.handlers[0]?.source).toBe(SourceFilter.Synthetic);
+    expect(quoted.module.handlers[0]?.source).toBe(SourceFilter.Any);
+    expect(computed.module.handlers[0]?.source).toBe(SourceFilter.Physical);
+  });
+
+  test("rejects source option shapes that would otherwise change trigger semantics", () => {
+    const spread = `
+      import { InputSource, Key, rt } from "../src/index";
+      const options = { source: InputSource.Synthetic };
+      rt.onKeyDown(Key.Q, () => {}, { ...options });
+    `;
+    const misspelled = `
+      import { InputSource, Key, rt } from "../src/index";
+      rt.onKeyDown(Key.Q, () => {}, { soruce: InputSource.Synthetic });
+    `;
+    expect(() => compileSource(spread)).toThrow(SpellwireCompileError);
+    expect(() => compileSource(misspelled)).toThrow(SpellwireCompileError);
+  });
+
+  test("rejects unsigned shifts because realtime values are signed i64", () => {
+    const source = `
+      import { Key, rt } from "../src/index";
+      let value = -1;
+      rt.onKeyDown(Key.Q, () => { value = value >>> 1; });
+    `;
+    expect(() => compileSource(source)).toThrow(SpellwireCompileError);
+  });
+
+  test("rejects trigger codes outside native handler-table ranges", () => {
+    const invalidKey = `
+      import { Key, rt } from "../src/index";
+      rt.onKeyDown(999 as Key, () => {});
+    `;
+    const invalidMouse = `
+      import { MouseButton, rt } from "../src/index";
+      rt.onMouseDown(8 as MouseButton, () => {});
+    `;
+    expect(() => compileSource(invalidKey)).toThrow(SpellwireCompileError);
+    expect(() => compileSource(invalidMouse)).toThrow(SpellwireCompileError);
+  });
+
+  test("rejects resource options outside native VM limits", () => {
+    const source = `rt.onKeyDown(20, () => {});`;
+    expect(() => compileSource(source, { stackLimit: 0 })).toThrow(SpellwireCompileError);
+    expect(() => compileSource(source, { stackLimit: 257 })).toThrow(SpellwireCompileError);
+    expect(() => compileSource(source, { instructionBudget: 0 })).toThrow(SpellwireCompileError);
+    expect(() => compileSource(source, { instructionBudget: 0x1_0000_0000 })).toThrow(
+      SpellwireCompileError,
+    );
   });
 });

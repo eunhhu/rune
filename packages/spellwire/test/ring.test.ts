@@ -21,4 +21,19 @@ describe("SpscInt32Ring", () => {
     expect(ring.push([3])).toBe(false);
     expect(ring.dropped).toBe(1);
   });
+
+  test("keeps full detection correct when u32 counters wrap", () => {
+    const ring = new SpscInt32Ring(2, 1);
+    Atomics.store(ring.header, 0, 0);
+    Atomics.store(ring.header, 1, -2);
+
+    expect(ring.size).toBe(2);
+    expect(ring.push([3])).toBe(false);
+    expect(ring.size).toBe(2);
+    expect(ring.dropped).toBe(1);
+  });
+
+  test("rejects fractional capacities", () => {
+    expect(() => new SpscInt32Ring(2.5, 1)).toThrow(RangeError);
+  });
 });

@@ -41,6 +41,13 @@ type Binding = { kind: "state" | "local"; slot: number };
 
 type FunctionDeclarationWithBody = ts.FunctionDeclaration & { body: ts.Block; name: ts.Identifier };
 
+type SourceFileWithParseDiagnostics = ts.SourceFile & {
+  readonly parseDiagnostics?: readonly ts.Diagnostic[];
+};
+
+const MAX_TRIGGER_KEY_CODE = 0xff;
+const MAX_TRIGGER_MOUSE_BUTTON = 7;
+
 interface LoopContext {
   breakPatches: number[];
   continuePatches: number[];
@@ -86,6 +93,7 @@ class Compiler {
   }
 
   compile(): CompileResult {
+    this.rejectSyntaxErrors();
     this.collectTopLevelDeclarations();
     this.collectHandlers();
     if (this.handlers.length === 0) {
@@ -203,8 +211,14 @@ class Compiler {
     const codeExpression = call.arguments[0];
     if (!codeExpression) this.fail(call, `${method} requires a key/button argument`);
     const code = this.constantNumber(codeExpression);
-    if (code === undefined || code < 0 || code > 0xffff) {
+    if (code === undefined) {
       this.fail(codeExpression, `${method} key/button must be a constant integer`);
+    }
+    const maxCode =
+      device === InputDevice.Keyboard ? MAX_TRIGGER_KEY_CODE : MAX_TRIGGER_MOUSE_BUTTON;
+    if (code < 0 || code > maxCode) {
+      const label = device === InputDevice.Keyboard ? "key code" : "mouse button";
+      this.fail(codeExpression, `${method} ${label} must be between 0 and ${maxCode}`);
     }
     const source = this.parseSource(call.arguments[2]);
     return { device, edge, source, code };
@@ -215,19 +229,42 @@ class Compiler {
     if (!ts.isObjectLiteralExpression(options)) {
       this.fail(options, "Realtime handler options must be an object literal");
     }
+    let source = SourceFilter.Physical;
+    let sourceSeen = false;
     for (const property of options.properties) {
-      if (
-        ts.isPropertyAssignment(property) &&
-        property.name.getText(this.sourceFile) === "source"
-      ) {
-        const value = this.constantNumber(property.initializer);
-        if (value === InputSource.Physical) return SourceFilter.Physical;
-        if (value === InputSource.Synthetic) return SourceFilter.Synthetic;
-        if (value === InputSource.Any) return SourceFilter.Any;
-        this.fail(property.initializer, "Invalid InputSource value");
+      let valueExpression: ts.Expression;
+      if (ts.isPropertyAssignment(property)) {
+        if (this.propertyName(property.name) !== "source") {
+          this.fail(property, "Realtime handler options support only the source property");
+        }
+        valueExpression = property.initializer;
+      } else if (ts.isShorthandPropertyAssignment(property) && property.name.text === "source") {
+        valueExpression = property.name;
+      } else {
+        this.fail(
+          property,
+          "Realtime handler options require an explicit or shorthand source property",
+        );
       }
+      if (sourceSeen) this.fail(property, "Realtime handler options contain duplicate source values");
+      sourceSeen = true;
+      const value = this.constantNumber(valueExpression);
+      if (value === InputSource.Physical) source = SourceFilter.Physical;
+      else if (value === InputSource.Synthetic) source = SourceFilter.Synthetic;
+      else if (value === InputSource.Any) source = SourceFilter.Any;
+      else this.fail(valueExpression, "Invalid InputSource value");
     }
-    return SourceFilter.Physical;
+    return source;
+  }
+
+  propertyName(name: ts.PropertyName): string | undefined {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+      return name.text;
+    }
+    if (ts.isComputedPropertyName(name) && ts.isStringLiteral(name.expression)) {
+      return name.expression.text;
+    }
+    return undefined;
   }
 
   compileBlock(block: ts.Block, parent: Scope): void {
@@ -929,15 +966,49 @@ class Compiler {
       },
     ]);
   }
+
+  rejectSyntaxErrors(): void {
+    const diagnostics = (this.sourceFile as SourceFileWithParseDiagnostics).parseDiagnostics ?? [];
+    if (diagnostics.length === 0) return;
+    throw new SpellwireCompileError(
+      diagnostics.map((diagnostic) => {
+        const start = diagnostic.start ?? 0;
+        const position = this.sourceFile.getLineAndCharacterOfPosition(start);
+        return {
+          fileName: this.sourceFile.fileName,
+          line: position.line + 1,
+          column: position.character + 1,
+          message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+        };
+      }),
+    );
+  }
 }
 
 export function compileSource(source: string, options: CompileOptions = {}): CompileResult {
+  const fileName = options.fileName ?? "macro.spellwire.ts";
+  const stackLimit = options.stackLimit ?? 128;
+  const instructionBudget = options.instructionBudget ?? 100_000;
+  if (!Number.isSafeInteger(stackLimit) || stackLimit < 1 || stackLimit > 256) {
+    throw optionError(fileName, "stackLimit must be an integer between 1 and 256");
+  }
+  if (
+    !Number.isSafeInteger(instructionBudget) ||
+    instructionBudget < 1 ||
+    instructionBudget > 0xffff_ffff
+  ) {
+    throw optionError(fileName, "instructionBudget must be an integer between 1 and 4294967295");
+  }
   const compiler = new Compiler(source, {
-    fileName: options.fileName ?? "macro.spellwire.ts",
-    stackLimit: options.stackLimit ?? 128,
-    instructionBudget: options.instructionBudget ?? 100_000,
+    fileName,
+    stackLimit,
+    instructionBudget,
   });
   return compiler.compile();
+}
+
+function optionError(fileName: string, message: string): SpellwireCompileError {
+  return new SpellwireCompileError([{ fileName, line: 1, column: 1, message }]);
 }
 
 function binaryOpcode(kind: ts.SyntaxKind): Opcode | undefined {
@@ -975,7 +1046,6 @@ function binaryOpcode(kind: ts.SyntaxKind): Opcode | undefined {
     case ts.SyntaxKind.LessThanLessThanToken:
       return Opcode.Shl;
     case ts.SyntaxKind.GreaterThanGreaterThanToken:
-    case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken:
       return Opcode.Shr;
     default:
       return undefined;

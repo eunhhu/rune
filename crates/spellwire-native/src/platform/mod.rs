@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
+#[allow(dead_code)] // Reserved ABI capability bits are advertised as backends land.
 pub enum Capability {
     None = 0,
     HostCallbackInjection = 1 << 0,

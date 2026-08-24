@@ -17,6 +17,10 @@ pub trait Injector {
     type Error;
 
     /// Submit a contiguous, zero-delay output batch to the platform backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend-specific error when the batch cannot be submitted.
     fn send(&mut self, events: &[OutputEvent]) -> Result<(), Self::Error>;
 }
 
@@ -231,6 +235,12 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    /// Validates a program and creates its trigger table and persistent state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProgramError`] when bytecode metadata, triggers, entries, jumps, or resource
+    /// limits are invalid.
     pub fn new(program: Program, config: RuntimeConfig) -> Result<Self, ProgramError> {
         validate_program(&program)?;
         let handlers = HandlerTable::build(&program.handlers)?;
@@ -256,6 +266,12 @@ impl Runtime {
         self.state.get(slot).copied()
     }
 
+    /// Applies one input event and executes every matching handler.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DispatchError::Vm`] for bytecode execution failures or
+    /// [`DispatchError::Inject`] when the platform injector rejects an output batch.
     pub fn dispatch<I: Injector>(
         &mut self,
         event: InputEvent,
@@ -298,6 +314,7 @@ enum ExecutionFailure<E> {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // Keeping the opcode dispatch in one match makes VM semantics auditable.
 fn execute<I: Injector>(
     program: &Program,
     entry: u32,
@@ -398,8 +415,12 @@ fn execute<I: Injector>(
             Opcode::BitAnd => binary!(|left, right| left & right),
             Opcode::BitOr => binary!(|left, right| left | right),
             Opcode::BitXor => binary!(|left, right| left ^ right),
-            Opcode::Shl => binary!(|left: i64, right: i64| left.wrapping_shl((right as u32) & 63)),
-            Opcode::Shr => binary!(|left: i64, right: i64| left.wrapping_shr((right as u32) & 63)),
+            Opcode::Shl => {
+                binary!(|left: i64, right: i64| left.wrapping_shl(shift_amount(right)));
+            }
+            Opcode::Shr => {
+                binary!(|left: i64, right: i64| left.wrapping_shr(shift_amount(right)));
+            }
             Opcode::Jump => pc = instruction.b,
             Opcode::JumpIfFalse => {
                 if pop!() == 0 {
@@ -473,7 +494,6 @@ fn execute<I: Injector>(
                 output_events = output_events.saturating_add(1);
             }
             Opcode::DelayUs => {
-                scratch.flush(injector).map_err(ExecutionFailure::Inject)?;
                 let raw_delay = if instruction.flags & crate::FLAG_STACK_OPERANDS != 0 {
                     pop!()
                 } else {
@@ -481,6 +501,7 @@ fn execute<I: Injector>(
                 };
                 let delay = u32::try_from(raw_delay)
                     .map_err(|_| ExecutionFailure::Vm(VmError::InvalidDelay(raw_delay)))?;
+                scratch.flush(injector).map_err(ExecutionFailure::Inject)?;
                 deadline = deadline
                     .checked_add(Duration::from_micros(u64::from(delay)))
                     .unwrap_or_else(Instant::now);
@@ -493,8 +514,12 @@ fn execute<I: Injector>(
 }
 
 fn unpack_pair(value: i64) -> (i32, i32) {
-    let raw = value as u64;
-    (raw as u32 as i32, (raw >> 32) as u32 as i32)
+    let [x0, x1, x2, x3, y0, y1, y2, y3] = value.to_le_bytes();
+    (i32::from_le_bytes([x0, x1, x2, x3]), i32::from_le_bytes([y0, y1, y2, y3]))
+}
+
+fn shift_amount(value: i64) -> u32 {
+    u32::try_from(value & 63).unwrap_or_default()
 }
 
 fn wait_until(deadline: Instant, spin_threshold: Duration) {
@@ -504,13 +529,19 @@ fn wait_until(deadline: Instant, spin_threshold: Duration) {
             return;
         };
         if remaining > spin_threshold {
-            thread::sleep(remaining - spin_threshold);
+            thread::sleep(remaining.saturating_sub(spin_threshold));
         } else {
             spin_loop();
         }
     }
 }
 
+/// Checks bytecode references and fixed runtime resource limits before dispatch.
+///
+/// # Errors
+///
+/// Returns [`ProgramError`] for empty programs, invalid entries/jumps/slots, or resource limits
+/// outside the fixed VM capacities.
 pub fn validate_program(program: &Program) -> Result<(), ProgramError> {
     if program.handlers.is_empty() {
         return Err(ProgramError::NoHandlers);
@@ -566,7 +597,10 @@ pub fn validate_program(program: &Program) -> Result<(), ProgramError> {
 mod tests {
     use core::convert::Infallible;
 
-    use crate::{key, Handler, InputSource, Instruction, Opcode, Program, SourceFilter, Trigger};
+    use crate::{
+        key, Handler, InputSource, Instruction, Opcode, Program, SourceFilter, Trigger,
+        FLAG_STACK_OPERANDS,
+    };
 
     use super::*;
 
@@ -630,5 +664,48 @@ mod tests {
         runtime.dispatch(event, &mut injector, &mut scratch).unwrap();
         assert_eq!(runtime.get_state(0), Some(2));
         assert_eq!(injector.0.len(), 2);
+    }
+
+    #[test]
+    fn invalid_dynamic_delay_does_not_flush_pending_output() {
+        let mut delay = Instruction::new(Opcode::DelayUs);
+        delay.flags = FLAG_STACK_OPERANDS;
+        let program = Program {
+            initial_state: Box::new([]),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::Q,
+                    edge: Edge::Down,
+                    source: SourceFilter::Physical,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![
+                Instruction::new(Opcode::KeyDown).with_a(key::E),
+                Instruction::new(Opcode::PushConst).with_immediate(-1),
+                delay,
+                Instruction::new(Opcode::KeyUp).with_a(key::E),
+                Instruction::new(Opcode::Halt),
+            ]
+            .into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 8,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let event = InputEvent {
+            device: InputDevice::Keyboard,
+            code: key::Q,
+            edge: Edge::Down,
+            source: InputSource::Physical,
+        };
+        let mut injector = RecordingInjector::default();
+        let mut scratch = VmScratch::new();
+
+        let error = runtime.dispatch(event, &mut injector, &mut scratch).unwrap_err();
+        assert!(matches!(error, DispatchError::Vm { source: VmError::InvalidDelay(-1), .. }));
+        assert!(injector.0.is_empty());
     }
 }

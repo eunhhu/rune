@@ -138,9 +138,10 @@ The simulator decodes the same binary format consumed by the C ABI, dispatches n
 ```bash
 bun install --frozen-lockfile
 bun run check
-cargo clippy --workspace --all-targets --locked
 cargo build --workspace --release --locked
 ```
+
+`bun run check` includes TypeScript tests, Rust tests, formatting, and Clippy with warnings denied.
 
 Run the native core benchmark:
 

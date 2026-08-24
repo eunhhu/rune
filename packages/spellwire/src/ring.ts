@@ -3,6 +3,7 @@ const WRITE_INDEX = 0;
 const READ_INDEX = 1;
 const DROPPED_INDEX = 2;
 const CLOSED_INDEX = 3;
+const MAX_CAPACITY = 0x8000_0000;
 
 /**
  * Fixed-record single-producer/single-consumer ring over SharedArrayBuffer.
@@ -17,8 +18,13 @@ export class SpscInt32Ring {
   readonly #mask: number;
 
   constructor(capacity: number, recordWords: number, buffer?: SharedArrayBuffer) {
-    if (capacity < 2 || (capacity & (capacity - 1)) !== 0) {
-      throw new RangeError("capacity must be a power of two and at least 2");
+    if (
+      !Number.isSafeInteger(capacity) ||
+      capacity < 2 ||
+      capacity > MAX_CAPACITY ||
+      (capacity & (capacity - 1)) !== 0
+    ) {
+      throw new RangeError("capacity must be a power of two between 2 and 2^31");
     }
     if (!Number.isInteger(recordWords) || recordWords <= 0) {
       throw new RangeError("recordWords must be a positive integer");
@@ -48,7 +54,7 @@ export class SpscInt32Ring {
     }
     const write = Atomics.load(this.header, WRITE_INDEX) >>> 0;
     const read = Atomics.load(this.header, READ_INDEX) >>> 0;
-    if (write - read >= this.capacity) {
+    if (((write - read) >>> 0) >= this.capacity) {
       Atomics.add(this.header, DROPPED_INDEX, 1);
       return false;
     }
@@ -90,6 +96,6 @@ export class SpscInt32Ring {
   get size(): number {
     const write = Atomics.load(this.header, WRITE_INDEX) >>> 0;
     const read = Atomics.load(this.header, READ_INDEX) >>> 0;
-    return write - read;
+    return (write - read) >>> 0;
   }
 }

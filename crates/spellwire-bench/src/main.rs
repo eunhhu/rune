@@ -13,7 +13,6 @@ struct NullInjector;
 impl Injector for NullInjector {
     type Error = Infallible;
 
-    #[inline(always)]
     fn send(&mut self, events: &[OutputEvent]) -> Result<(), Self::Error> {
         black_box(events);
         Ok(())
@@ -71,15 +70,15 @@ fn main() {
     for _ in 0..samples {
         let start = Instant::now();
         black_box(runtime.dispatch(event, &mut injector, &mut scratch).unwrap());
-        timings.push(start.elapsed().as_nanos() as u64);
+        timings.push(u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX));
     }
     timings.sort_unstable();
 
     println!("Spellwire VM dispatch benchmark ({samples} samples)");
-    println!("p50  {:>8} ns", percentile(&timings, 50.0));
-    println!("p95  {:>8} ns", percentile(&timings, 95.0));
-    println!("p99  {:>8} ns", percentile(&timings, 99.0));
-    println!("p999 {:>8} ns", percentile(&timings, 99.9));
+    println!("p50  {:>8} ns", percentile(&timings, 500));
+    println!("p95  {:>8} ns", percentile(&timings, 950));
+    println!("p99  {:>8} ns", percentile(&timings, 990));
+    println!("p999 {:>8} ns", percentile(&timings, 999));
     println!("max  {:>8} ns", timings.last().copied().unwrap_or(0));
     println!();
     println!(
@@ -87,10 +86,10 @@ fn main() {
     );
 }
 
-fn percentile(sorted: &[u64], percentile: f64) -> u64 {
+fn percentile(sorted: &[u64], permille: usize) -> u64 {
     if sorted.is_empty() {
         return 0;
     }
-    let rank = ((percentile / 100.0) * (sorted.len().saturating_sub(1) as f64)).round() as usize;
+    let rank = sorted.len().saturating_sub(1).saturating_mul(permille).saturating_add(500) / 1_000;
     sorted[rank.min(sorted.len() - 1)]
 }

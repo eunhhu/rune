@@ -16,15 +16,20 @@ export enum EventSource {
 }
 
 export interface InputEvent {
-  device: InputDevice;
-  code: number;
-  edge: InputEdge;
-  source: EventSource;
-  timestampLo: number;
-  timestampHi: number;
+  readonly device: InputDevice;
+  readonly code: number;
+  readonly edge: InputEdge;
+  readonly source: EventSource;
+  readonly timestampLo: number;
+  readonly timestampHi: number;
 }
 
 export type InputHandler = (event: InputEvent) => void;
+
+interface HandlerRegistration {
+  readonly handler: InputHandler;
+  removePending: boolean;
+}
 
 const EVENT_WORDS = 6;
 
@@ -34,16 +39,10 @@ const EVENT_WORDS = 6;
  */
 export class DynamicInputLane {
   readonly ring: SpscInt32Ring;
-  readonly #handlers: InputHandler[][];
+  readonly #handlers: HandlerRegistration[][];
   readonly #record = new Int32Array(EVENT_WORDS);
-  readonly #event: InputEvent = {
-    device: InputDevice.Keyboard,
-    code: 0,
-    edge: InputEdge.Down,
-    source: EventSource.Physical,
-    timestampLo: 0,
-    timestampHi: 0,
-  };
+  #activeHandlers: HandlerRegistration[] | undefined;
+  #draining = false;
 
   constructor(capacity = 1024, buffer?: SharedArrayBuffer) {
     this.ring = new SpscInt32Ring(capacity, EVENT_WORDS, buffer);
@@ -54,40 +53,64 @@ export class DynamicInputLane {
     const bucket = this.#bucket(device, code, edge);
     const handlers = this.#handlers[bucket];
     if (!handlers) {
-      throw new RangeError("input code is outside the dynamic lane range");
+      throw new RangeError("input tuple is outside the dynamic lane range");
     }
-    handlers.push(handler);
+    const registration: HandlerRegistration = { handler, removePending: false };
+    handlers.push(registration);
     return () => {
-      const index = handlers.indexOf(handler);
-      if (index >= 0) handlers.splice(index, 1);
+      const index = handlers.indexOf(registration);
+      if (index < 0 || registration.removePending) return;
+      if (this.#activeHandlers === handlers) {
+        registration.removePending = true;
+      } else {
+        handlers.splice(index, 1);
+      }
     };
   }
 
   drain(maxEvents = 1024): number {
-    let count = 0;
-    while (count < maxEvents && this.ring.pop(this.#record)) {
-      this.#event.device = this.#record[0] as InputDevice;
-      this.#event.code = this.#record[1] ?? 0;
-      this.#event.edge = this.#record[2] as InputEdge;
-      this.#event.source = this.#record[3] as EventSource;
-      this.#event.timestampLo = this.#record[4] ?? 0;
-      this.#event.timestampHi = this.#record[5] ?? 0;
-      const handlers = this.#handlers[
-        this.#bucket(this.#event.device, this.#event.code, this.#event.edge)
-      ];
-      if (handlers) {
-        // Copying the handler list would allocate. Mutation during dispatch is documented
-        // to affect only subsequent events.
-        for (let index = 0; index < handlers.length; index += 1) {
-          handlers[index]?.(this.#event);
-        }
-      }
-      count += 1;
+    if (this.#draining) throw new Error("dynamic input lane drain is not reentrant");
+    if (!Number.isSafeInteger(maxEvents) || maxEvents < 0) {
+      throw new RangeError("maxEvents must be a non-negative safe integer");
     }
-    return count;
+    this.#draining = true;
+    let count = 0;
+    try {
+      while (count < maxEvents && this.ring.pop(this.#record)) {
+        const event: InputEvent = {
+          device: this.#record[0] as InputDevice,
+          code: this.#record[1] ?? 0,
+          edge: this.#record[2] as InputEdge,
+          source: this.#record[3] as EventSource,
+          timestampLo: this.#record[4] ?? 0,
+          timestampHi: this.#record[5] ?? 0,
+        };
+        const handlers = this.#handlers[this.#bucket(event.device, event.code, event.edge)];
+        if (handlers) {
+          const handlerCount = handlers.length;
+          this.#activeHandlers = handlers;
+          try {
+            for (let index = 0; index < handlerCount; index += 1) {
+              handlers[index]?.handler(event);
+            }
+          } finally {
+            this.#activeHandlers = undefined;
+            for (let index = handlers.length - 1; index >= 0; index -= 1) {
+              if (handlers[index]?.removePending) handlers.splice(index, 1);
+            }
+          }
+        }
+        count += 1;
+      }
+      return count;
+    } finally {
+      this.#draining = false;
+    }
   }
 
   #bucket(device: InputDevice, code: number, edge: InputEdge): number {
+    if (device !== InputDevice.Keyboard && device !== InputDevice.MouseButton) return -1;
+    if (edge !== InputEdge.Down && edge !== InputEdge.Up) return -1;
     if (!Number.isInteger(code) || code < 0 || code >= 256) return -1;
     return (device * 2 + edge) * 256 + code;
   }

@@ -60,6 +60,7 @@ rt.onKeyDown(
 - `InputSource.Any`.
 
 The compiler resolves key/button arguments and source options as constants.
+The options object may be empty or contain one explicit, quoted, computed-string, or shorthand `source` property. Spreads and unknown properties fail compilation instead of defaulting silently.
 
 ## Realtime output intrinsics
 
@@ -189,6 +190,8 @@ unsubscribe();
 ```
 
 This is control-plane plumbing, not the native realtime handler path.
+
+Each delivered event is a stable readonly snapshot. Registering or unregistering handlers during dispatch affects only subsequent events, and `drain()` cannot be called reentrantly on the same lane.
 
 ## Native state wrapper
 

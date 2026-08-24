@@ -153,6 +153,7 @@ The realtime compiler rejects or excludes features that require an unconstrained
 - arbitrary npm/Bun APIs;
 - network or filesystem I/O;
 - dynamic property access;
+- unsigned right shift (`>>>`); realtime integers are signed 64-bit values;
 - runtime-created closures;
 - non-void helper returns.
 

@@ -65,6 +65,8 @@ int32_t spellwire_engine_set_output_callback(
 
 Each callback receives one contiguous zero-delay output batch. Returning zero reports success; any non-zero status aborts the current dispatch as an injection error.
 
+Callbacks must not call dispatch, state, callback-registration, or free functions on the same engine. Such reentrant operations return `-6` (`engine busy`); reentrant `spellwire_engine_free` is ignored and must be called again after the outer dispatch returns. Queue follow-up input or lifecycle work in the host instead.
+
 `SpellwireOutputEvent` is a fixed C representation:
 
 ```c
@@ -108,7 +110,7 @@ edge:   0 down, 1 up
 source: 0 physical, 1 synthetic
 ```
 
-The function updates held-input state, matches triggers, executes bytecode, waits for delays, and invokes the output callback. The host must not call the same engine concurrently.
+The function updates held-input state, matches triggers, executes bytecode, waits for delays, and invokes the output callback. Engine operations are serialized: concurrent or reentrant access returns `-6`. Freeing must not race with another thread using the engine.
 
 The ABI does **not** currently start a platform observer thread. The host is responsible for obtaining input events and translating output callback records to its platform injection API.
 
@@ -132,4 +134,4 @@ Use the compiler-generated JSON manifest to map source variable names to slots. 
 
 ## Error handling
 
-The ABI uses null pointers and negative integer status codes rather than allocating error strings on the dispatch path. Hosts should validate the binary/manifest at load time and translate status codes outside latency-sensitive code.
+The ABI uses null pointers and negative integer status codes rather than allocating error strings on the dispatch path. Status `-6` consistently means that the engine is already busy. Hosts should validate the binary/manifest at load time and translate status codes outside latency-sensitive code.
