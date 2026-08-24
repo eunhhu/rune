@@ -3,8 +3,8 @@ name: Materialize Spellwire source tree
 on:
   push:
     branches: ["feat/spellwire-rebrand"]
-  pull_request:
-    branches: [main]
+    paths:
+      - ".github/workflows/bootstrap.yml"
 
 permissions:
   contents: write
@@ -22,9 +22,15 @@ jobs:
           ref: feat/spellwire-rebrand
           fetch-depth: 0
 
+      - name: Preserve workflow files
+        run: cp -a .github/workflows /tmp/spellwire-workflows
+
       - name: Expand and rebrand verified source tree
         run: |
           python3 .bootstrap/unpack.py
+          rm -rf .github/workflows
+          mkdir -p .github/workflows
+          cp -a /tmp/spellwire-workflows/. .github/workflows/
           sed -i 's/toBe("RUNE")/toBe("SPWR")/' packages/spellwire/test/encode.test.ts
           sed -i 's/\*b"RUNE"/\*b"SPWR"/' crates/spellwire-core/src/bytecode.rs
           sed -i 's#// RUNE#// SPWR#' packages/spellwire/src/compiler/encode.ts
@@ -47,10 +53,9 @@ jobs:
           cargo build -p spellwire-native --release
           bun run pack:dry-run
 
-      - name: Commit clean source to the feature branch
+      - name: Commit verified source without changing workflows
         run: |
           set -euo pipefail
-          rm -f .github/workflows/bootstrap.yml
           rm -f examples/*.spellwire.bin examples/*.spellwire.bin.json
           rm -rf packages/*/dist target node_modules packages/*/node_modules
           git config user.name "github-actions[bot]"
