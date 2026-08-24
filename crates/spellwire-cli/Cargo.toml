@@ -1,0 +1,20 @@
+[package]
+name = "spellwire-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+default-run = "spellwire-sim"
+
+[[bin]]
+name = "spellwire-sim"
+path = "src/main.rs"
+
+[dependencies]
+spellwire-core = { path = "../spellwire-core" }
+
+[lints]
+workspace = true

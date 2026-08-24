@@ -1,28 +1,77 @@
-# Native overlay model
+# Overlay
 
-The overlay is intentionally outside the input thread. TypeScript mutates a retained scene; a renderer consumes snapshots or mutation batches on its own thread. Rendering never calls JavaScript once per frame.
+The current SDK includes a retained `OverlayScene` data model. It does not create a native window or render pixels yet.
 
-Initial primitives are deliberately small:
+## Current API
 
-- text
-- rectangle / rounded rectangle
-- line
-- image (planned)
-- clip and transform (planned)
+```ts
+import { OverlayScene } from "spellwire";
 
-A DOM, browser layout engine, webview, accessibility tree, and general widget toolkit are out of scope.
+const scene = new OverlayScene();
 
-```text
-Bun scene update → inactive snapshot → atomic publish
-                                           │
-render thread ← acquire current snapshot ──┘
+const latencyId = scene.create({
+  kind: "text",
+  x: 24,
+  y: 24,
+  text: "-- µs",
+  size: 16,
+});
+
+scene.update(latencyId, {
+  kind: "text",
+  x: 24,
+  y: 24,
+  text: "42 µs",
+  size: 16,
+});
+
+const mutations = scene.drainMutations();
+const snapshot = scene.snapshot();
+scene.remove(latencyId);
 ```
 
-Target platform direction:
+Supported node shapes:
 
-- Windows: transparent click-through topmost HWND with DirectComposition/Direct2D/DirectWrite
-- macOS: non-activating transparent NSPanel with Core Animation/Core Text or Metal
-- Linux X11: ARGB overlay window with an EGL-backed renderer
-- Linux Wayland: capability-based layer-shell support where the compositor exposes it
+```ts
+type OverlayNode =
+  | { kind: "text"; x: number; y: number; text: string; size: number }
+  | { kind: "rect"; x: number; y: number; width: number; height: number; radius: number }
+  | { kind: "line"; x1: number; y1: number; x2: number; y2: number; width: number };
+```
 
-Overlay benchmarks must be reported separately and must include input p99 with the overlay disabled and enabled. Enabling a static HUD must not measurably perturb the input thread.
+Every create/update/remove operation records a monotonically increasing revision and a mutation. A host renderer can drain mutations or request a complete snapshot.
+
+The current implementation uses normal JavaScript `Map`, arrays, and `structuredClone`; it belongs to the Bun control plane, not to native input dispatch.
+
+## Renderer contract
+
+A future renderer should consume scene mutations/snapshots on a dedicated native thread:
+
+```text
+Bun scene update
+    → build/publish retained scene state
+        → native render thread
+```
+
+The input VM must not take an overlay lock, wait for a frame, or invoke JavaScript while dispatching an event. Overlay failure must not stop input execution.
+
+## Planned platform direction
+
+- Windows: transparent click-through topmost window with DirectComposition/Direct2D/DirectWrite.
+- macOS: non-activating transparent panel with Core Animation/Core Text or Metal.
+- Linux X11: ARGB window with an EGL-backed renderer.
+- Linux Wayland: capability-based layer-shell support where the compositor provides it.
+
+These are design directions, not current implementation claims.
+
+## Performance gate
+
+Before native overlay support is advertised, measurements should include:
+
+- idle CPU and resident memory for a static text node;
+- scene publication time;
+- render p50/p95/p99;
+- cost at 100, 1,000, and 10,000 primitives;
+- native input dispatch p99 with overlay disabled and enabled.
+
+The last comparison is mandatory: enabling a static overlay must not measurably worsen input dispatch jitter.

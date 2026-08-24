@@ -3,7 +3,7 @@ mod platform;
 use core::{ffi::c_void, ptr, slice};
 
 use spellwire_core::{
-    Edge, InputDevice, InputEvent, InputSource, Injector, OutputEvent, Program, Runtime,
+    Edge, Injector, InputDevice, InputEvent, InputSource, OutputEvent, Program, Runtime,
     RuntimeConfig, VmScratch,
 };
 
@@ -30,19 +30,11 @@ impl SpellwireOutputEvent {
             OutputEvent::Key { code, down } => {
                 Self { kind: 1, flags: u8::from(down), code, x: 0, y: 0 }
             }
-            OutputEvent::MouseButton { button, down } => Self {
-                kind: 2,
-                flags: u8::from(down),
-                code: button as u16,
-                x: 0,
-                y: 0,
-            },
-            OutputEvent::MouseMove { dx, dy } => {
-                Self { kind: 3, flags: 0, code: 0, x: dx, y: dy }
+            OutputEvent::MouseButton { button, down } => {
+                Self { kind: 2, flags: u8::from(down), code: button as u16, x: 0, y: 0 }
             }
-            OutputEvent::MouseWheel { x, y } => {
-                Self { kind: 4, flags: 0, code: 0, x, y }
-            }
+            OutputEvent::MouseMove { dx, dy } => Self { kind: 3, flags: 0, code: 0, x: dx, y: dy },
+            OutputEvent::MouseWheel { x, y } => Self { kind: 4, flags: 0, code: 0, x, y },
         }
     }
 }
@@ -77,7 +69,11 @@ impl Injector for CallbackInjector {
         // SAFETY: The callback and context are provided by the host. The slice points
         // to storage owned by this injector and stays valid for the duration of the call.
         let status = unsafe { callback(self.context, self.converted.as_ptr(), events.len()) };
-        if status == 0 { Ok(()) } else { Err(status) }
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(status)
+        }
     }
 }
 
@@ -106,7 +102,10 @@ pub extern "C" fn spellwire_capabilities() -> u32 {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn spellwire_engine_new(bytes: *const u8, len: usize) -> *mut SpellwireEngine {
+pub unsafe extern "C" fn spellwire_engine_new(
+    bytes: *const u8,
+    len: usize,
+) -> *mut SpellwireEngine {
     if bytes.is_null() || len == 0 {
         return ptr::null_mut();
     }
@@ -203,5 +202,9 @@ pub unsafe extern "C" fn spellwire_engine_state_set(
     let Some(engine) = (unsafe { engine.as_mut() }) else {
         return -1;
     };
-    if engine.runtime.set_state(slot, value) { 0 } else { -2 }
+    if engine.runtime.set_state(slot, value) {
+        0
+    } else {
+        -2
+    }
 }

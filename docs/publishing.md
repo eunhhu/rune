@@ -16,9 +16,13 @@ bun install --frozen-lockfile
 bun run typecheck
 bun run test:ts
 bun run compile:example
+bun run inspect:example
+bun run simulate:example
 bun run pack:dry-run
-cargo test --workspace
-cargo build -p spellwire-native --release
+cargo fmt --all -- --check
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked
+cargo build --workspace --release --locked
 ```
 
 The package dry run must show only the intended TypeScript source, README, license, and package metadata.

@@ -24,3 +24,5 @@ bunx spellwire compile macro.spellwire.ts
 ```
 
 The alpha package includes the SDK, AOT compiler, CLI, JavaScript fallback lane, and host-facing types. Prebuilt global-input backends are not bundled yet. See the repository documentation for the native VM/C ABI and implementation status.
+
+For deterministic compiler/VM integration testing, the repository also contains the native `spellwire-sim` utility. It is a source-workspace tool and is not bundled as a prebuilt npm binary in this alpha.

@@ -1,7 +1,9 @@
 use core::fmt;
 
 use crate::{
-    bytecode::{WIRE_HANDLER_SIZE, WIRE_HEADER_SIZE, WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION},
+    bytecode::{
+        WIRE_HANDLER_SIZE, WIRE_HEADER_SIZE, WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION,
+    },
     Edge, Handler, InputDevice, Instruction, Opcode, Program, SourceFilter, Trigger,
 };
 
@@ -31,7 +33,9 @@ impl fmt::Display for DecodeError {
             Self::InvalidSource(value) => write!(f, "invalid input source filter {value}"),
             Self::InvalidOpcode(value) => write!(f, "invalid opcode {value}"),
             Self::SizeOverflow => f.write_str("Spellwire bytecode size overflow"),
-            Self::TrailingBytes(count) => write!(f, "Spellwire bytecode has {count} trailing bytes"),
+            Self::TrailingBytes(count) => {
+                write!(f, "Spellwire bytecode has {count} trailing bytes")
+            }
         }
     }
 }
@@ -59,9 +63,8 @@ impl Program {
         debug_assert_eq!(reader.offset(), WIRE_HEADER_SIZE);
 
         let state_bytes = state_count.checked_mul(8).ok_or(DecodeError::SizeOverflow)?;
-        let handler_bytes = handler_count
-            .checked_mul(WIRE_HANDLER_SIZE)
-            .ok_or(DecodeError::SizeOverflow)?;
+        let handler_bytes =
+            handler_count.checked_mul(WIRE_HANDLER_SIZE).ok_or(DecodeError::SizeOverflow)?;
         let instruction_bytes = instruction_count
             .checked_mul(WIRE_INSTRUCTION_SIZE)
             .ok_or(DecodeError::SizeOverflow)?;

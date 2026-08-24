@@ -1,36 +1,131 @@
 # Troubleshooting
 
-## `bun add spellwire` returns 404
+## `spellwire` or `spellwire/compiler` cannot be resolved
 
-The packages have not been published yet. Merge the release-ready branch, configure npm publishing, and publish `spellwire` before `create-spellwire`. See [publishing.md](publishing.md).
-
-## `spellwire` command not found
-
-Ensure `spellwire` is a direct dependency and run through Bun's package runner:
+Install the workspace with Bun:
 
 ```bash
-bunx spellwire --help
-bunx spellwire compile macro.spellwire.ts
+bun install --frozen-lockfile
 ```
 
-Inside a generated project, `bun run build` invokes the local binary automatically.
+Run commands from the repository root so Bun can resolve the workspace packages.
 
-## Realtime intrinsic executed outside a handler
+## TypeScript build errors mention missing declaration outputs
 
-Output and held-state intrinsics require either compiled realtime execution or `withRealtimeActionSink()` in JavaScript tests.
+The SDK and compiler use TypeScript project references. Use build mode rather than checking each project independently:
 
-## Compiler rejects an object, Promise, or dynamic property
+```bash
+bun run typecheck
+```
 
-Only the analyzable realtime subset is lowered to native bytecode. Keep dynamic objects, network work, file I/O, async functions, and UI logic in ordinary Bun control-plane code.
+To remove generated declaration/build metadata:
 
-## The package compiles macros but does not observe global input
+```bash
+bun run clean:ts
+```
 
-That is the current alpha boundary. The npm package does not yet include validated/prebuilt OS observation and injection backends. Build and embed `spellwire-native` to exercise the VM host ABI, or test the compiler and JavaScript fallback lane until native packages are released.
+## Compilation says no realtime handlers were found
 
-## macOS or Linux input permissions
+Registrations must be top-level calls with an inline callback:
 
-See [platforms.md](platforms.md). Spellwire does not advertise a backend capability until permission behavior and latency have been verified.
+```ts
+rt.onKeyDown(Key.Q, () => {
+  tapKey(Key.E);
+});
+```
 
-## Performance results look noisy
+A registration hidden inside another runtime function is not discovered by the current compiler.
 
-Measure release builds, pin the workload where practical, warm up first, and report percentile distributions rather than only averages. Distinguish VM dispatch from HID polling, OS injection, and target-application polling.
+## A handler rejects ordinary TypeScript
+
+The module may contain unrestricted control-plane TypeScript, but realtime handlers can reference only values the compiler can lower to bounded integer bytecode.
+
+Common causes:
+
+- capturing a string/object/array;
+- calling an arbitrary Bun/npm function;
+- a non-constant key or handler option;
+- a helper that returns a value;
+- recursion or a runtime-created closure;
+- destructuring or dynamic property access.
+
+See [TypeScript Runtime](typescript-runtime.md).
+
+## `sleepUs()` is inaccurate
+
+The current runtime uses an absolute deadline and a spin tail, but a general-purpose desktop OS is not a hard realtime scheduler. The simulator also executes delays synchronously, so long waits make the command appear paused.
+
+Microsecond input is a deadline request, not a physical end-to-end guarantee.
+
+## `bun macro.spellwire.ts` produces no global keyboard events
+
+That is expected in the current branch. Executing the source directly registers JavaScript fallback handlers; it does not install a Windows/macOS/Linux observer.
+
+Use:
+
+```bash
+bunx spellwire compile macro.spellwire.ts
+cargo run -q -p spellwire-cli --locked -- simulate macro.spellwire.bin key-down:Q key-up:Q
+```
+
+Direct OS backends are listed as planned in [Platform Status](platforms.md).
+
+## Native library output does nothing
+
+`spellwire-native` discards output if no host callback is installed. A host must call `spellwire_engine_set_output_callback` and translate received batches to its platform injection API.
+
+The ABI does not currently provide `start()` or `stop()` functions for global observation. See [Native C ABI](native-abi.md).
+
+## Simulator rejects an event
+
+Use one of these forms:
+
+```text
+key-down:Q
+key-up:LeftShift
+mouse-down:left
+mouse-up:forward
+key-down:0x14:synthetic
+```
+
+The optional source is `physical` or `synthetic`. Handler filters may use `InputSource.Any`, but an actual event itself must have a concrete source.
+
+## Generated files keep appearing
+
+Compiler outputs and TypeScript build products are ignored by Git:
+
+```text
+*.spellwire.bin
+*.spellwire.bin.json
+packages/*/dist/
+*.tsbuildinfo
+```
+
+Remove TypeScript build outputs with `bun run clean:ts`.
+
+## Rust tests pass but Clippy prints warnings
+
+The workspace enables `clippy::pedantic` at warning level. CI runs Clippy on every target, but it does not pass `-D warnings`; warnings remain visible while compile/test failures are blocking.
+
+## Verify everything locally
+
+```bash
+bun run check
+cargo clippy --workspace --all-targets --locked
+bun run compile:example
+bun run inspect:example
+bun run simulate:example
+```
+
+## Reporting a compiler/VM issue
+
+Include:
+
+- OS and CPU;
+- Bun and Rust versions;
+- commit SHA;
+- minimal `.spellwire.ts` source;
+- compiler diagnostic or simulator output;
+- generated manifest when state mapping matters.
+
+Latency reports are premature for platform input until a direct backend exists. Core benchmark reports should identify that they measure VM dispatch only.

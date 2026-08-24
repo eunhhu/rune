@@ -109,13 +109,13 @@ impl HandlerTable {
         for (slot, ids) in lists.into_iter().enumerate() {
             let start = handler_ids.len();
             handler_ids.extend(ids);
-            buckets[slot] = Bucket {
-                start: start as u32,
-                len: (handler_ids.len() - start) as u16,
-            };
+            buckets[slot] = Bucket { start: start as u32, len: (handler_ids.len() - start) as u16 };
         }
 
-        Ok(Self { buckets: buckets.into_boxed_slice(), handler_ids: handler_ids.into_boxed_slice() })
+        Ok(Self {
+            buckets: buckets.into_boxed_slice(),
+            handler_ids: handler_ids.into_boxed_slice(),
+        })
     }
 
     #[must_use]

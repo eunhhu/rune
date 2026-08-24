@@ -3,6 +3,7 @@ members = [
   "crates/spellwire-core",
   "crates/spellwire-native",
   "crates/spellwire-bench",
+  "crates/spellwire-cli",
 ]
 resolver = "2"
 

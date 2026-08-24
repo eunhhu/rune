@@ -5,10 +5,13 @@ mod vm;
 mod wire;
 
 pub use bytecode::{
-    Instruction, Opcode, WIRE_HANDLER_SIZE, WIRE_HEADER_SIZE, WIRE_INSTRUCTION_SIZE, WIRE_MAGIC,
-    WIRE_VERSION, FLAG_STACK_OPERANDS,
+    Instruction, Opcode, FLAG_STACK_OPERANDS, WIRE_HANDLER_SIZE, WIRE_HEADER_SIZE,
+    WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION,
 };
-pub use model::{key, Edge, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent, SourceFilter, Trigger};
+pub use model::{
+    key, Edge, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent, SourceFilter,
+    Trigger,
+};
 pub use program::{Handler, HandlerTable, MatchingHandlers, Program, ProgramError};
 pub use vm::{
     validate_program, DispatchError, DispatchReport, Injector, InputState, Runtime, RuntimeConfig,

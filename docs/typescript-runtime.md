@@ -1,48 +1,179 @@
-# TypeScript execution model
+# TypeScript Runtime
 
-Spellwire is not a callback wrapper around a generic automation package. It has two TypeScript execution lanes because full JavaScript semantics and predictable microsecond-scale dispatch are different constraints.
+Spellwire uses TypeScript as an authoring language and compiles the latency-sensitive subset ahead of time. A source file does not need a wrapper such as `rt.load()`; the `.spellwire.ts` module itself is the compilation unit.
 
-## Realtime AOT lane
+## Compilation boundary
 
-Handlers registered with `rt.onKeyDown`, `rt.onKeyUp`, `rt.onMouseDown`, and `rt.onMouseUp` are parsed from TypeScript and lowered to Spellwire bytecode before the input runtime starts.
+The compiler scans the module for top-level calls to:
 
-Inside those handlers Spellwire currently supports ordinary TypeScript syntax for:
+```ts
+rt.onKeyDown(...)
+rt.onKeyUp(...)
+rt.onMouseDown(...)
+rt.onMouseUp(...)
+```
 
-- persistent module-scope integer and boolean variables
-- local variables and assignments
-- `if` / `else` and conditional expressions
-- `for`, `while`, and `do` loops with `break` / `continue`
-- integer arithmetic, comparisons, bit operations, and boolean short-circuiting
-- top-level helper functions with parameters, inlined at compile time
-- key/mouse output, held-key queries, and microsecond deadlines
+Only code needed by those handlers is lowered to native bytecode. Other top-level TypeScript may coexist as control-plane code, but a handler cannot capture a dynamic value that the compiler cannot represent.
 
-The native VM owns captured state. An input dispatch therefore performs no native-to-JavaScript callback, JS allocation, promise scheduling, or property lookup.
+## Persistent state
+
+A module-scope mutable `let` initialized to a compile-time integer or boolean becomes a persistent native state slot when a realtime handler references it.
 
 ```ts
 let phase = 0;
-
-function burst(count: number): void {
-  for (let i = 0; i < count; i++) tapKey(Key.E);
-}
+let enabled = true;
 
 rt.onKeyDown(Key.Q, () => {
-  phase = (phase + 1) % 3;
-  if (phase !== 0) burst(phase);
+  if (enabled) phase = (phase + 1) % 3;
 });
 ```
 
-This is TypeScript syntax, but not every JavaScript value can be represented in the realtime VM. Objects, strings, closures over dynamic objects, exceptions, promises, recursion, and unbounded platform APIs stay out of this lane. The compiler reports a source-positioned error when realtime code captures an unsupported value. Every handler also has a native instruction budget so a bad loop cannot permanently occupy the input thread.
+The state survives after the handler returns. The generated `.spellwire.bin.json` manifest maps each source name to its native slot and kind.
 
-## Dynamic Bun lane
+Module-scope `const` declarations are folded as compile-time constants when possible.
 
-The rest of the module remains ordinary TypeScript running in Bun. This lane is for configuration, files, networking, UI orchestration, plugins, complex objects, async work, and observability.
+Spellwire numbers on the realtime plane are signed 64-bit integers. Numeric literals must be safe JavaScript integers at compile time. Booleans are represented as native integer truth values.
 
-Dynamic input subscriptions use a fixed-record `SharedArrayBuffer` SPSC ring. A dedicated worker drains the ring instead of invoking a JavaScript callback directly from the native input thread. This lowers overhead and isolates the native producer, but it is still best-effort JavaScript and does not carry Spellwire's realtime latency contract.
+## Handler-local variables
 
-## State boundary
+Handler and helper-function locals compile to fixed VM local slots:
 
-Realtime state is persistent across handler invocations and is addressable from the control plane through generated state metadata and the native `state_get` / `state_set` ABI. A future source transform can rewrite dynamic references to captured variables automatically; the initial ABI exposes explicit state handles so synchronization is never implicit or racy.
+```ts
+rt.onKeyDown(Key.Q, () => {
+  let count = phase + 1;
+  count *= 2;
+  tapKey(Key.E);
+});
+```
 
-## Why not execute arbitrary Bun callbacks on the hot path?
+Destructuring and dynamically sized local containers are not supported.
 
-Bun is fast, but event-loop scheduling, garbage collection, deoptimisation, and native-to-JS transitions introduce tail latency. They are acceptable for control work and unacceptable as the only path for a macro that advertises microsecond-scale dispatch. Spellwire therefore optimizes TypeScript by moving analyzable hot code into a small native machine while retaining Bun for the language features that genuinely need JavaScript.
+## Conditions and expressions
+
+The compiler supports the integer/boolean operations needed for state machines, including:
+
+- arithmetic and remainder;
+- comparison and equality;
+- logical short-circuit expressions;
+- bitwise operations and shifts;
+- prefix unary operations;
+- assignment and compound assignment;
+- prefix/postfix increment and decrement.
+
+```ts
+if (enabled && phase >= 2 && !keyHeld(Key.LeftShift)) {
+  tapKey(Key.E);
+} else {
+  tapKey(Key.R);
+}
+```
+
+Unsupported expressions fail compilation with a source-position diagnostic instead of falling back silently to JavaScript.
+
+## Loops
+
+Supported loop forms:
+
+```ts
+for (let index = 0; index < count; index++) {
+  tapKey(Key.E);
+}
+
+while (enabled) {
+  break;
+}
+
+do {
+  phase++;
+} while (phase < 3);
+```
+
+`break` and `continue` are supported. Every handler has an instruction budget, so an accidental infinite loop fails rather than running without a bound.
+
+## Helper functions
+
+Top-level helper functions called by handlers are compiled inline:
+
+```ts
+function tapRepeated(key: Key, count: number): void {
+  for (let index = 0; index < count; index++) {
+    keyDown(key);
+    keyUp(key);
+  }
+}
+```
+
+Current restrictions:
+
+- helper functions return `void` only;
+- arguments must lower to integer values;
+- functions are inlined rather than dynamically dispatched;
+- recursion is rejected;
+- runtime-created closures are not supported.
+
+Inlining removes a per-event JavaScript or VM function-call boundary, but it can increase bytecode size.
+
+## Realtime intrinsics
+
+```ts
+keyDown(Key.E)
+keyUp(Key.E)
+tapKey(Key.E)
+mouseDown(MouseButton.Left)
+mouseUp(MouseButton.Left)
+clickMouse(MouseButton.Left)
+moveMouse(4, -2)
+wheelMouse(0, 1)
+sleepUs(75)
+keyHeld(Key.LeftShift)
+mouseHeld(MouseButton.Right)
+```
+
+The compiler recognizes these functions by name and emits native opcodes.
+
+## Delay behavior
+
+`sleepUs(n)` flushes the pending output batch and advances an absolute monotonic deadline. The runtime sleeps until the configured spin tail, then actively spins for the remaining interval.
+
+The current VM executes delays synchronously on the dispatching thread. A preallocated continuation/deadline scheduler is planned so long macro waits can yield without blocking input observation.
+
+Desktop operating systems are not hard realtime schedulers; microsecond syntax is a requested deadline, not a guarantee that physical end-to-end latency has the same precision.
+
+## Deliberately unsupported
+
+The realtime compiler rejects or excludes features that require an unconstrained JavaScript runtime or unpredictable allocation:
+
+- floating-point semantics as a separate type;
+- strings in realtime expressions;
+- dynamic objects, arrays, maps, and sets;
+- destructuring;
+- `async`, `await`, and `Promise`;
+- exceptions as general control flow;
+- generators;
+- arbitrary npm/Bun APIs;
+- network or filesystem I/O;
+- dynamic property access;
+- runtime-created closures;
+- non-void helper returns.
+
+Move such work to ordinary Bun code and exchange only bounded state/configuration with the native host.
+
+## Resource limits
+
+Current defaults and caps:
+
+| Resource | Value |
+| --- | ---: |
+| Default stack limit | 128 values |
+| Native maximum stack | 256 values |
+| Native maximum locals | 256 values |
+| Native output batch | 64 events |
+| Default instruction budget | 100,000 instructions/handler |
+
+Programs are validated before dispatch. Invalid jumps, slots, entries, limits, and empty programs are rejected during loading.
+
+## Fallback execution
+
+Executing a `.spellwire.ts` module directly with Bun records the `rt.on*` registrations in a JavaScript fallback list. With `withRealtimeActionSink()`, tests can call those handlers and observe their actions.
+
+That fallback preserves useful semantics for debugging, but it is not the native AOT path and carries no realtime latency guarantee.

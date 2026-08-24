@@ -1,9 +1,12 @@
 use core::{fmt, hint::spin_loop};
-use std::{thread, time::{Duration, Instant}};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use crate::{
-    Edge, HandlerTable, InputDevice, InputEvent, MouseButton, Opcode, OutputEvent,
-    Program, ProgramError,
+    Edge, HandlerTable, InputDevice, InputEvent, MouseButton, Opcode, OutputEvent, Program,
+    ProgramError,
 };
 
 pub const MAX_STACK: usize = 256;
@@ -50,7 +53,9 @@ impl fmt::Display for VmError {
             Self::InvalidProgramCounter(pc) => write!(f, "invalid program counter {pc}"),
             Self::InvalidKeyCode(code) => write!(f, "invalid key code {code}"),
             Self::InvalidMouseButton(button) => write!(f, "invalid mouse button {button}"),
-            Self::InvalidCoordinate(value) => write!(f, "mouse coordinate delta {value} does not fit i32"),
+            Self::InvalidCoordinate(value) => {
+                write!(f, "mouse coordinate delta {value} does not fit i32")
+            }
             Self::InvalidDelay(value) => write!(f, "delay {value} does not fit u32 microseconds"),
             Self::InstructionBudgetExceeded(budget) => {
                 write!(f, "instruction budget {budget} exceeded")
@@ -189,17 +194,10 @@ impl VmScratch {
     }
 
     fn peek(&self) -> Result<i64, VmError> {
-        self.stack_len
-            .checked_sub(1)
-            .map(|index| self.stack[index])
-            .ok_or(VmError::StackUnderflow)
+        self.stack_len.checked_sub(1).map(|index| self.stack[index]).ok_or(VmError::StackUnderflow)
     }
 
-    fn queue<I: Injector>(
-        &mut self,
-        event: OutputEvent,
-        injector: &mut I,
-    ) -> Result<(), I::Error> {
+    fn queue<I: Injector>(&mut self, event: OutputEvent, injector: &mut I) -> Result<(), I::Error> {
         if self.output_len == self.output.len() {
             self.flush(injector)?;
         }
@@ -270,16 +268,8 @@ impl Runtime {
         let Runtime { program, handlers, state, input_state, config } = self;
         for handler_id in handlers.matching(event) {
             let entry = program.handlers[usize::from(handler_id)].entry;
-            let execution = execute(
-                program,
-                entry,
-                event,
-                input_state,
-                state,
-                injector,
-                scratch,
-                *config,
-            );
+            let execution =
+                execute(program, entry, event, input_state, state, injector, scratch, *config);
             let execution = match execution {
                 Ok(value) => value,
                 Err(ExecutionFailure::Vm(source)) => {
@@ -391,14 +381,20 @@ fn execute<I: Injector>(
                 }
                 push!(left.wrapping_rem(right));
             }
-            Opcode::Neg => { let value = pop!(); push!(value.wrapping_neg()); },
+            Opcode::Neg => {
+                let value = pop!();
+                push!(value.wrapping_neg());
+            }
             Opcode::Eq => binary!(|left, right| i64::from(left == right)),
             Opcode::Ne => binary!(|left, right| i64::from(left != right)),
             Opcode::Lt => binary!(|left, right| i64::from(left < right)),
             Opcode::Le => binary!(|left, right| i64::from(left <= right)),
             Opcode::Gt => binary!(|left, right| i64::from(left > right)),
             Opcode::Ge => binary!(|left, right| i64::from(left >= right)),
-            Opcode::Not => { let value = pop!(); push!(i64::from(value == 0)); },
+            Opcode::Not => {
+                let value = pop!();
+                push!(i64::from(value == 0));
+            }
             Opcode::BitAnd => binary!(|left, right| left & right),
             Opcode::BitOr => binary!(|left, right| left | right),
             Opcode::BitXor => binary!(|left, right| left ^ right),
@@ -541,7 +537,10 @@ pub fn validate_program(program: &Program) -> Result<(), ProgramError> {
     for (index, instruction) in program.code.iter().enumerate() {
         match instruction.opcode {
             Opcode::Jump | Opcode::JumpIfFalse if instruction.b as usize >= program.code.len() => {
-                return Err(ProgramError::InvalidJump { instruction: index, target: instruction.b });
+                return Err(ProgramError::InvalidJump {
+                    instruction: index,
+                    target: instruction.b,
+                });
             }
             Opcode::LoadState | Opcode::StoreState
                 if usize::from(instruction.a) >= program.initial_state.len() =>
@@ -551,9 +550,7 @@ pub fn validate_program(program: &Program) -> Result<(), ProgramError> {
                     slot: instruction.a,
                 });
             }
-            Opcode::LoadLocal | Opcode::StoreLocal
-                if instruction.a >= program.local_count =>
-            {
+            Opcode::LoadLocal | Opcode::StoreLocal if instruction.a >= program.local_count => {
                 return Err(ProgramError::InvalidLocalSlot {
                     instruction: index,
                     slot: instruction.a,
@@ -569,9 +566,7 @@ pub fn validate_program(program: &Program) -> Result<(), ProgramError> {
 mod tests {
     use core::convert::Infallible;
 
-    use crate::{
-        key, Handler, InputSource, Instruction, Opcode, Program, SourceFilter, Trigger,
-    };
+    use crate::{key, Handler, InputSource, Instruction, Opcode, Program, SourceFilter, Trigger};
 
     use super::*;
 
