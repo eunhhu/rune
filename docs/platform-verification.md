@@ -98,6 +98,7 @@ The command reports p50, p95, p99, p999, and maximum nanoseconds for zero-delta 
 
 ```bash
 target/release/spellwire-overlay --smoke
+bun run test:overlay-live
 ```
 
 Success prints one JSON line and exits after roughly 350 ms:
@@ -129,6 +130,7 @@ Run the native checks:
 bun run test:platform-loopback
 bun run bench:platform -- 10000
 .\target\release\spellwire-overlay.exe --smoke
+bun run test:overlay-live
 ```
 
 Expected loopback fields:
@@ -197,6 +199,7 @@ The backend waits for the uinput device to register, identifies Spellwire's virt
 printf 'XDG_SESSION_TYPE=%s DISPLAY=%s WAYLAND_DISPLAY=%s\n' \
   "${XDG_SESSION_TYPE:-}" "${DISPLAY:-}" "${WAYLAND_DISPLAY:-}"
 target/release/spellwire-overlay --smoke
+bun run test:overlay-live
 ```
 
 Repeat on each supported desktop/compositor. X11 and Wayland environments differ; winit cannot provide one universal Wayland layer-shell guarantee. Record desktop name, version, session type, monitor arrangement, and whether the window is transparent, topmost, and click-through.
@@ -205,7 +208,7 @@ Repeat on each supported desktop/compositor. X11 and Wayland environments differ
 
 `scripts/platform-loopback.ts` performs these checks in order:
 
-1. load `examples/platform-loopback.spellwire.ts` through ABI v3;
+1. load `examples/platform-loopback.spellwire.ts` through ABI v4;
 2. require both observe and inject permissions;
 3. attach a 64-record `DynamicInputLane`;
 4. explicitly dispatch physical-source F19 into the VM;
@@ -277,6 +280,7 @@ Loopback JSON:
 Platform benchmark (sample count and full percentiles):
 
 Overlay ready JSON:
+Overlay live-state JSON:
 Overlay visually transparent/topmost/click-through:
 Monitor count and scaling:
 

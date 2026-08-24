@@ -10,15 +10,16 @@ Spellwire는 README 구현 계획이 source에 반영된 초기 alpha입니다. 
 - versioned `SPWR` encoder/decoder와 structural/runtime validation
 - bounded native VM stack/local/output batch/instruction budget/fixed trigger table
 - fixed-capacity continuation scheduler: `sleepUs()`가 observer worker를 block하지 않고 absolute deadline까지 yield
-- compatibility C ABI와 ABI v3 owned-host lifecycle/reload/state/permission/error/dispatch/shared ring
+- compatibility C ABI와 ABI v4 owned-host lifecycle/reload/scalar·bulk state/permission/error/dispatch/shared ring
 - Bun FFI `NativeHost`: start/stop, `.ts` memory compile, `.bin` manifest, serialized watch reload, name/kind state preservation
 - native observer에서 shared 6-word SPSC ring으로 연결되는 callback-free `DynamicInputLane`
 - Windows low-level keyboard/mouse hook와 tagged batched `SendInput`
 - macOS listen-only `CGEventTap`, permission check, private tagged `CGEventPost`, tap recovery
 - Linux evdev discovery/hotplug와 dedicated uinput keyboard/mouse
 - physical/synthetic recursion classification와 USB HID translation test
-- transparent/topmost/click-through retained overlay process와 mutation-only Bun protocol
-- VM/OS-submission percentile benchmark
+- fill/stroke/radius/shadow/opacity/font style을 가진 상태 기반 Figma식 row/column/stack layout, keyed diff, 통합 lifecycle API
+- text/rect/ellipse/line, coalesced batch protocol, dirty raster, partial GPU upload를 가진 transparent/topmost/click-through retained overlay process
+- VM/overlay reconciliation/OS-submission percentile benchmark
 - cross-platform CI, Rust 1.81, npm dry-run, checksum, optional Windows/macOS signing/notarization artifact matrix
 
 ## 검증 상태

@@ -24,6 +24,8 @@ bun run build  # dist/main.spellwire.bin과 manifest 생성
 
 `start`와 `watch`는 네이티브 호스트를 시작하기 전에 플랫폼 권한을 자동으로 확인하고 요청합니다.
 
+생성 프로젝트의 `src/app.ts`에는 상태 기반 modern overlay도 포함됩니다. `Spellwire.start()`와 Figma식 `ui.row`/`ui.column` auto layout을 사용하므로 수동 update loop 없이 realtime 로직과 UI를 분리해 편집할 수 있습니다. [상태 기반 네이티브 오버레이](docs/overlay.ko.md)를 참고하십시오.
+
 첫 npm 배포 이후 기존 프로젝트에 직접 설치하려면 다음 명령을 사용합니다.
 
 ```bash
@@ -126,7 +128,7 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 | 명시적 dispatch 및 owned-host C ABI | 구현 완료 |
 | Bun FFI 호스트, 명명 상태, watch/reload, SPSC lane | 구현 완료 |
 | Windows `SendInput`, macOS `CGEventPost`, Linux evdev/uinput | 구현 완료, macOS 실제 검증 완료 |
-| 투명 click-through retained overlay | 구현 완료, macOS 실제 검증 완료 |
+| 상태 기반 auto-layout overlay, modern style, retained dirty update | 구현 완료, macOS 실제 검증 완료 |
 | 플랫폼별 prebuilt/signing workflow | 구현 완료, 배포 자격 증명 필요 |
 | 물리 입력부터 대상 앱까지의 마이크로초 지연 보장 | 주장하지 않음 |
 

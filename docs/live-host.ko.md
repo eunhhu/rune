@@ -63,7 +63,7 @@ Linux:   target/release/libspellwire_native.so
 bun packages/spellwire/src/cli.ts permissions
 ```
 
-현재 소스에서는 ABI `3`, capabilities `0x37`, `observe: granted`, `inject: granted`가 정상입니다. Windows UIPI는 대상 process에 따라 달라지고, macOS는 두 privacy grant가 필요하며, Linux는 device file 접근 권한이 필요합니다.
+현재 소스에서는 ABI `4`, capabilities `0x37`, `observe: granted`, `inject: granted`가 정상입니다. Windows UIPI는 대상 process에 따라 달라지고, macOS는 두 privacy grant가 필요하며, Linux는 device file 접근 권한이 필요합니다.
 
 ## CLI의 세 workflow
 
@@ -143,9 +143,27 @@ bunx spellwire run macro.spellwire.bin --manifest configs/macro-state.json
 
 세 명령의 기본 입력은 `src/main.spellwire.ts`입니다. `--library <path>`는 native library 탐색을, `--manifest <path>`는 compiled input의 인접 manifest를 덮어씁니다.
 
-## `NativeHost` 직접 사용
+## 통합 programmatic API
 
-Bun process가 애플리케이션 상태, dynamic input lane, overlay도 직접 관리해야 한다면 programmatic API를 사용합니다.
+application state, hot reload, overlay binding, permission, shutdown을 owner 하나로 관리할 수 있습니다.
+
+```ts
+import { Spellwire, ui } from "spellwire";
+
+const app = await Spellwire.start({
+  input: "macro.spellwire.ts",
+  watch: true,
+  overlay: (state) => ui.text(String(state.phase ?? 0)),
+});
+
+await app.untilSignal();
+```
+
+modern layout/style 속성과 정확한 state update 경로는 [상태 기반 네이티브 오버레이](overlay.ko.md)를 참고하십시오.
+
+## Low-level `NativeHost` 직접 사용
+
+다른 lifecycle owner가 permission, watcher, lane, shutdown을 직접 관리해야 할 때 low-level host를 사용합니다.
 
 ```ts
 import { NativeHost, NativePermission } from "spellwire";

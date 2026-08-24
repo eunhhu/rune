@@ -10,15 +10,16 @@ Spellwire is an early alpha with the README implementation plan represented in s
 - versioned `SPWR` encoder/decoder and structural/runtime validation;
 - bounded native VM stack, locals, output batch, instruction budget, and fixed trigger table;
 - fixed-capacity continuation scheduler: `sleepUs()` yields until an absolute monotonic deadline without blocking the observer worker;
-- compatibility engine C ABI plus ABI v3 owned-host lifecycle, reload, state, permissions, error, dispatch, and shared input-ring APIs;
+- compatibility engine C ABI plus ABI v4 owned-host lifecycle, reload, scalar/bulk state, permissions, error, dispatch, and shared input-ring APIs;
 - Bun FFI `NativeHost` with start/stop, `.ts` in-memory compilation, `.bin` manifest loading, serialized watch reload, and state preservation by source name and kind;
 - callback-free `DynamicInputLane` connection from the native observer through a shared six-word SPSC record ring;
 - Windows low-level keyboard/mouse hooks and tagged batched `SendInput` injection;
 - macOS listen-only `CGEventTap`, Input Monitoring/Accessibility checks, private event source, tagged `CGEventPost`, and tap recovery;
 - Linux evdev discovery/hotplug observation and a dedicated uinput keyboard/mouse device;
 - explicit physical/synthetic recursion classification and supported USB HID translation tests;
-- transparent, topmost, click-through retained overlay process with text/rect/line nodes, alpha composition, and mutation-only Bun protocol;
-- VM and native OS-submission percentile benchmark commands;
+- state-driven Figma-style row/column/stack layout with fill/stroke/radius/shadow/opacity/font styling, keyed diff, and unified lifecycle API;
+- transparent, topmost, click-through retained overlay process with text/rect/ellipse/line nodes, coalesced batch protocol, dirty raster, and partial GPU uploads;
+- VM, overlay reconciliation, and native OS-submission percentile benchmark commands;
 - cross-platform CI, Rust 1.81 check, npm dry-runs, and release artifact matrix with checksums and optional Windows/macOS signing plus macOS notarization.
 
 ## Validation state

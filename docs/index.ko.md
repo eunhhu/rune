@@ -12,7 +12,7 @@
 6. **[아키텍처](architecture.ko.md)** — compiler, wire format, VM, native host, dynamic lane, overlay 경계를 설명합니다.
 7. **[네이티브 C ABI](native-abi.ko.md)** — owned platform host, shared input ring, compatibility engine을 설명합니다.
 8. **[플랫폼 상태](platforms.ko.md)** — 플랫폼별 API, 권한, 검증 상태, 알려진 한계를 정리합니다.
-9. **[네이티브 오버레이](overlay.ko.md)** — retained scene API와 별도 renderer process를 설명합니다.
+9. **[네이티브 오버레이](overlay.ko.md)** — state binding, Figma식 layout/style API, retained dirty renderer를 설명합니다.
 10. **[문제 해결](troubleshooting.ko.md)** — 설치, compiler, simulator, host, overlay 문제를 진단합니다.
 11. **[배포](publishing.ko.md)** — 네이티브 artifact와 npm 패키지 배포 절차를 설명합니다.
 12. **[구현 상태](status.ko.md)** — 구현 완료 기능과 외부 검증 gate를 구분합니다.

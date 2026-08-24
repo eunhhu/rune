@@ -34,6 +34,8 @@ bun run build  # write dist/main.spellwire.bin plus its JSON manifest
 
 `start` and `watch` check/request global-input permissions automatically. No separate setup command is needed for the normal path.
 
+The scaffold separates `src/main.spellwire.ts` realtime logic from the `src/app.ts` state-driven overlay. The latter already uses `Spellwire.start()` and modern auto layout; see [Overlay](overlay.md) before editing it.
+
 ## Develop from source
 
 ### Requirements

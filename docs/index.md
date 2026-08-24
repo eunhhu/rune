@@ -12,7 +12,7 @@ Use these pages in order when evaluating the current alpha:
 6. **[Architecture](architecture.md)** — public package, compiler, wire format, VM, simulator, and host boundary.
 7. **[Native C ABI](native-abi.md)** — owned platform host, shared input ring, and compatibility engine.
 8. **[Platform Status](platforms.md)** — backend APIs, permissions, validation, and target limitations.
-9. **[Overlay](overlay.md)** — retained scene API and native renderer process.
+9. **[Overlay](overlay.md)** — state binding, Figma-style layout/styling API, retained dirty renderer.
 10. **[Troubleshooting](troubleshooting.md)** — setup, compiler, simulator, and host-boundary issues.
 11. **[Publishing](publishing.md)** — npm package release and verification.
 12. **[Implementation Status](status.md)** — implemented features and external gates.

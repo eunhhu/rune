@@ -18,6 +18,8 @@ bun run watch  # run with native hot reload
 bun run build  # write the native program and state manifest under dist/
 ```
 
+`src/main.spellwire.ts` contains realtime VM logic. `src/app.ts` contains the generated state-driven modern overlay and unified `Spellwire.start()` lifecycle; no manual render/update loop is required.
+
 Skip dependency installation when scaffolding offline:
 
 ```bash

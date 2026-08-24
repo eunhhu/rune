@@ -69,7 +69,7 @@ Normal `run`/`watch` commands prepare permissions automatically. For platform di
 bun packages/spellwire/src/cli.ts permissions
 ```
 
-A fully ready host prints `observe: granted` and `inject: granted`. ABI `3` and capabilities `0x37` are expected for this source tree. Platform-specific caveats still apply: Windows UIPI is target-specific, macOS has two privacy grants, and Linux requires device-file access.
+A fully ready host prints `observe: granted` and `inject: granted`. ABI `4` and capabilities `0x37` are expected for this source tree. Platform-specific caveats still apply: Windows UIPI is target-specific, macOS has two privacy grants, and Linux requires device-file access.
 
 ## Three CLI workflows
 
@@ -146,9 +146,27 @@ bun packages/spellwire/src/cli.ts run macro.spellwire.bin --manifest configs/mac
 
 The default input for all three commands is `src/main.spellwire.ts`. `--library <path>` overrides native library discovery; `--manifest <path>` overrides the adjacent manifest for compiled input.
 
-## Use `NativeHost` programmatically
+## Use the unified programmatic API
 
-Use the programmatic API when the same Bun process also owns application state, a dynamic input lane, or an overlay.
+Application state, hot reload, overlay binding, permissions, and shutdown fit in one owner:
+
+```ts
+import { Spellwire, ui } from "spellwire";
+
+const app = await Spellwire.start({
+  input: "macro.spellwire.ts",
+  watch: true,
+  overlay: (state) => ui.text(String(state.phase ?? 0)),
+});
+
+await app.untilSignal();
+```
+
+See [State-driven native overlay](overlay.md) for modern layout/style properties and the exact state-update path.
+
+## Use `NativeHost` as a low-level host
+
+Use the low-level host when another lifecycle owner needs manual permission, watcher, lane, or shutdown control.
 
 ```ts
 import {

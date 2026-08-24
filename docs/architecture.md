@@ -58,7 +58,7 @@ Observation callbacks perform bounded translation and `try_send`; the worker own
 
 ## Overlay isolation
 
-The overlay is a companion executable because desktop window event loops need main-thread ownership, especially on macOS. It retains scene nodes, draws only after mutations, and communicates through newline JSON. It shares no locks with the input worker; renderer exit cannot stop the host.
+The overlay is a companion executable because desktop window event loops need main-thread ownership, especially on macOS. Bun builds a Figma-style auto-layout tree only when a bound state snapshot changes, reconciles stable primitive keys, and sends one coalesced newline-JSON batch. Native code retains primitive nodes, rerasterizes the union of old/new dirty bounds, and uploads only a 256-byte-row-aligned texture region. It shares no renderer lock with input dispatch; renderer exit cannot stop the host.
 
 ## Measurement boundaries
 

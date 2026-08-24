@@ -58,7 +58,7 @@ observation callback은 제한된 translation과 `try_send`만 수행합니다. 
 
 ## Overlay 격리
 
-desktop window event loop는 특히 macOS에서 main-thread ownership이 필요하므로 overlay는 companion executable입니다. scene node를 native에 retained하고 mutation이 있을 때만 그리며 newline JSON으로 통신합니다. input worker와 lock을 공유하지 않으므로 renderer 종료가 host를 멈추지 않습니다.
+desktop window event loop는 특히 macOS에서 main-thread ownership이 필요하므로 overlay는 companion executable입니다. Bun은 bound state snapshot이 바뀔 때만 Figma식 auto-layout tree를 만들고 stable primitive key를 reconcile한 뒤 newline JSON batch 하나를 보냅니다. native는 primitive를 retained하고 old/new dirty bounds 합집합만 rerasterize하며 256-byte row에 정렬된 texture 영역만 upload합니다. input dispatch와 renderer lock을 공유하지 않아 renderer 종료가 host를 멈추지 않습니다.
 
 ## 측정 경계
 

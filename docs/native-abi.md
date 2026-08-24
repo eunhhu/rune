@@ -17,7 +17,7 @@ Linux:   target/release/libspellwire_native.so
 ## Version and capabilities
 
 ```c
-uint32_t spellwire_abi_version(void);       // 3
+uint32_t spellwire_abi_version(void);       // 4
 uint32_t spellwire_capabilities(void);
 uint32_t spellwire_permission_status(void);
 uint32_t spellwire_request_permissions(void);
@@ -60,6 +60,11 @@ int32_t spellwire_host_dispatch(
 );
 int32_t spellwire_host_state_get(const SpellwireHost *host, size_t slot, int64_t *output);
 int32_t spellwire_host_state_set(SpellwireHost *host, size_t slot, int64_t value);
+int32_t spellwire_host_state_snapshot(
+  const SpellwireHost *host,
+  int64_t *output,
+  size_t capacity
+);
 size_t spellwire_host_last_error(const SpellwireHost *host, char *buffer, size_t capacity);
 ```
 
@@ -68,6 +73,8 @@ size_t spellwire_host_last_error(const SpellwireHost *host, char *buffer, size_t
 Reload is synchronous. The low-level flag copies common state slots positionally. The Bun wrapper passes false and preserves compatible values by manifest name and kind, preventing state reordering from corrupting values.
 
 `spellwire_host_last_error(host, NULL, 0)` returns the required UTF-8 buffer length including NUL. A second call copies the most recent platform/runtime message.
+
+`spellwire_host_state_snapshot` copies all persistent slots with one synchronous worker command. `capacity` must cover the program state length. The Bun overlay binding reuses one `BigInt64Array`, then maps slots to manifest names without one FFI call per state.
 
 ## Shared dynamic input ring
 

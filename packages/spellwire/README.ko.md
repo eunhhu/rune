@@ -29,8 +29,25 @@ bunx spellwire compile macro.spellwire.ts
 
 `run`과 `watch`는 소스를 메모리에서 AOT 컴파일하고 플랫폼 권한을 준비한 뒤 동일한 네이티브 호스트를 시작합니다. `watch`가 추가하는 작업은 control-plane 파일 감시와 직렬화된 reload뿐이며 네이티브 실시간 dispatch 경로는 JavaScript callback 없이 유지됩니다.
 
+상태와 overlay를 boilerplate 없이 하나의 lifecycle로 연결할 수 있습니다.
+
+```ts
+import { Spellwire, ui } from "spellwire";
+
+const app = await Spellwire.start({
+  input: "src/main.spellwire.ts",
+  watch: true,
+  overlay: (state) => ui.column(
+    { width: 280, padding: 16, gap: 8, fill: "#111827ee", radius: 16 },
+    ui.text(state.enabled === true ? "Active" : "Paused"),
+  ),
+});
+await app.untilSignal();
+```
+
 자세한 내용:
 
 - [라이브 네이티브 호스트](https://github.com/eunhhu/spellwire/blob/main/docs/live-host.ko.md)
 - [플랫폼 검증](https://github.com/eunhhu/spellwire/blob/main/docs/platform-verification.ko.md)
 - [API 레퍼런스](https://github.com/eunhhu/spellwire/blob/main/docs/api.ko.md)
+- [상태 기반 오버레이](https://github.com/eunhhu/spellwire/blob/main/docs/overlay.ko.md)

@@ -39,7 +39,7 @@ macOS arm64에서 다음 항목을 통과했습니다.
 
 - 전체 Rust workspace test/Clippy/release build
 - TypeScript build와 test
-- Bun FFI를 통한 ABI v3 load와 permission read
+- Bun FFI를 통한 ABI v4 load, bulk state snapshot, permission read
 - tagged F20 `CGEventPost` injection → `CGEventTap` observation → synthetic VM trigger
 - `DynamicInputLane` publication과 smoke scenario drop 0
 - Retina resolution transparent click-through overlay creation/mutation rendering

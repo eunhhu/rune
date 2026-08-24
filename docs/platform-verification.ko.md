@@ -94,6 +94,7 @@ p50, p95, p99, p999, max nanosecond를 출력합니다. macOS에서는 `CGEventP
 
 ```bash
 target/release/spellwire-overlay --smoke
+bun run test:overlay-live
 ```
 
 약 350ms 뒤 종료하며 다음 형태의 한 줄을 출력합니다.
@@ -123,6 +124,7 @@ library는 `target\release\spellwire_native.dll`이어야 합니다. Windows는 
 bun run test:platform-loopback
 bun run bench:platform -- 10000
 .\target\release\spellwire-overlay.exe --smoke
+bun run test:overlay-live
 ```
 
 정상 loopback 형태:
@@ -189,6 +191,7 @@ backend는 uinput device registration을 기다리고, Spellwire virtual device�
 printf 'XDG_SESSION_TYPE=%s DISPLAY=%s WAYLAND_DISPLAY=%s\n' \
   "${XDG_SESSION_TYPE:-}" "${DISPLAY:-}" "${WAYLAND_DISPLAY:-}"
 target/release/spellwire-overlay --smoke
+bun run test:overlay-live
 ```
 
 지원하려는 desktop/compositor마다 반복하십시오. X11과 Wayland의 window semantics는 다르며 winit만으로 모든 Wayland compositor에 하나의 universal layer-shell guarantee를 제공할 수 없습니다. desktop 이름/버전, session type, monitor 배치, transparency/topmost/click-through 결과를 기록하십시오.
@@ -197,7 +200,7 @@ target/release/spellwire-overlay --smoke
 
 `scripts/platform-loopback.ts`는 다음 순서로 동작합니다.
 
-1. `examples/platform-loopback.spellwire.ts`를 ABI v3로 load
+1. `examples/platform-loopback.spellwire.ts`를 ABI v4로 load
 2. observe와 inject permission 확인
 3. 64-record `DynamicInputLane` 연결
 4. physical-source F19를 VM에 명시적으로 dispatch
@@ -265,6 +268,7 @@ Loopback JSON:
 Platform benchmark (sample count and full percentiles):
 
 Overlay ready JSON:
+Overlay live-state JSON:
 Overlay visually transparent/topmost/click-through:
 Monitor count and scaling:
 

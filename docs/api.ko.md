@@ -11,7 +11,9 @@ import {
   InputSource,
   NativeHost,
   NativeOverlayRenderer,
+  Overlay,
   OverlayScene,
+  Spellwire,
   Key,
   MouseButton,
   clickMouse,
@@ -25,6 +27,7 @@ import {
   rt,
   sleepUs,
   tapKey,
+  ui,
   wheelMouse,
 } from "spellwire";
 ```
@@ -198,14 +201,25 @@ host.close();
 | `reload({ preserveState? })` | reload 직렬화, 기본적으로 compatible name/kind state 보존 |
 | `watch(options?)` | debounce와 callback을 지정해 file 감시 |
 | `state(name)` / `states[name]` | 현재 manifest의 `NativeState` 접근 |
+| `snapshotStates()` | native worker command 한 번으로 모든 named state 조회 |
 | `attachDynamicLane(lane)` | observed input을 shared record로 publish |
 | `dispatch(...)` | test/custom embedder용 명시 VM input |
 | `close()` | 필요 시 stop, native host free, library close |
 
 host는 package library, `SPELLWIRE_NATIVE_LIBRARY`, workspace release/debug build 순서로 탐색합니다. `close()`는 idempotent이고 stop은 추적 중인 synthetic held input을 해제합니다. 자세한 예제는 [라이브 네이티브 호스트](live-host.ko.md)를 참고하십시오.
 
-## Overlay와 ABI
+## 통합 application lifecycle
 
-`OverlayScene`은 text/rect/line node를 retained합니다. `NativeOverlayRenderer.start()`는 별도 renderer를 실행하고 `apply(scene)`는 pending mutation만 전송합니다. [네이티브 오버레이](overlay.ko.md)를 참고하십시오.
+`Spellwire.start(options)`는 host load, 자동 권한 준비, start, 선택적 watch, 상태 기반 overlay, 안전한 종료를 소유합니다. `options.overlay(state)`는 shallow named-state snapshot을 받습니다. `refreshOverlay()`는 수동 update boundary를 지원하고 `untilSignal()`은 host stop 전에 overlay를 종료합니다.
+
+## Modern overlay
+
+`Overlay.mount(tree, options?)`는 retained declarative tree를 mount합니다. `ui`는 `row`, `column`, `panel`, `stack`, `frame`, `box`, `text`, `ellipse`, `dot`, `divider`, `badge`, `spacer`, `bind`, `when`을 export합니다.
+
+layout prop은 숫자/`"fill"` width·height, min/max dimension, padding, gap, alignment, justification, offset을 지원합니다. visual prop은 fill, stroke, radius, shadow, 상속 opacity, system/monospace family, font size/weight, line height, letter spacing, text alignment를 지원합니다.
+
+`OverlayScene`과 `NativeOverlayRenderer`는 text/rect/ellipse/line primitive용 low-level retained API로 유지됩니다. pending change는 node별로 합쳐지고 `apply(scene)`는 batch 하나를 전송합니다. 상태 결합 예제와 속성 계약은 [상태 기반 네이티브 오버레이](overlay.ko.md)를 참고하십시오.
+
+## ABI
 
 C ABI는 owned platform host와 compatibility callback engine을 모두 포함합니다. [네이티브 C ABI](native-abi.ko.md)를 참고하십시오.

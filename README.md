@@ -34,6 +34,8 @@ bun run build  # write dist/main.spellwire.bin and its manifest
 
 `start` and `watch` prepare platform permissions automatically before the native host starts.
 
+Generated projects also include a state-driven modern overlay in `src/app.ts`. It uses `Spellwire.start()` plus Figma-style `ui.row`/`ui.column` auto layout; edit realtime logic and UI independently without a manual update loop. See [State-driven native overlay](docs/overlay.md).
+
 ## Stateful realtime TypeScript
 
 ```ts
@@ -132,7 +134,7 @@ If this is your first live run, follow [Live Native Host Guide](docs/live-host.m
 | C ABI with explicit and owned-host lifecycle APIs | Implemented |
 | Bun FFI host, named state, watch/reload, and SPSC dynamic lane | Implemented |
 | Windows hooks/`SendInput`, macOS event tap/`CGEventPost`, Linux evdev/uinput | Implemented; macOS live-verified |
-| Native transparent click-through retained overlay | Implemented; macOS live-verified |
+| State-driven auto-layout overlay, modern styling, retained dirty updates | Implemented; macOS live-verified |
 | Cross-platform prebuilt artifact/signing workflow | Implemented; release credentials required |
 | Physical end-to-end microsecond latency claim | Not claimed |
 

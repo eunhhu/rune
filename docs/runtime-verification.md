@@ -39,7 +39,7 @@ On macOS arm64, the following passed:
 
 - complete Rust workspace tests/Clippy/release build;
 - TypeScript build and tests;
-- ABI v3 load and permission read through Bun FFI;
+- ABI v4 load, bulk state snapshot, and permission read through Bun FFI;
 - global tagged F20 injection observed through `CGEventTap` and handled by the synthetic VM trigger;
 - native observer publication into `DynamicInputLane` with zero drops in the smoke scenario;
 - transparent click-through overlay creation at Retina resolution and mutation rendering;

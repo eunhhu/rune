@@ -11,7 +11,9 @@ import {
   InputSource,
   NativeHost,
   NativeOverlayRenderer,
+  Overlay,
   OverlayScene,
+  Spellwire,
   Key,
   MouseButton,
   clickMouse,
@@ -25,6 +27,7 @@ import {
   rt,
   sleepUs,
   tapKey,
+  ui,
   wheelMouse,
 } from "spellwire";
 ```
@@ -262,15 +265,24 @@ The host resolves a packaged platform library, `SPELLWIRE_NATIVE_LIBRARY`, or wo
 | `reload({ preserveState? })` | Serialize reload and preserve running state by compatible manifest name/kind by default |
 | `watch(options?)` | Watch the input file with configurable debounce and reload callbacks |
 | `state(name)` / `states[name]` | Access a named `NativeState` from the current manifest |
+| `snapshotStates()` | Read every named state with one bulk native worker command |
 | `attachDynamicLane(lane)` | Publish observed input into the lane's six-word shared records |
 | `dispatch(...)` | Explicitly submit a VM input for tests or custom embedders |
 | `close()` | Stop if needed, free native ownership, and close the dynamic library |
 
 See [Live Native Host Guide](live-host.md) for complete long-running examples, signal handling, state-preservation rules, dynamic-lane timestamps/drops, library resolution order, and native error interpretation.
 
-## Overlay scene model
+## Unified application lifecycle
 
-`OverlayScene` retains text/rect/line nodes. `NativeOverlayRenderer.start()` launches the companion transparent renderer; `apply(scene)` sends only pending mutations. `show()`, `hide()`, `clear()`, and `close()` are control-plane operations. See [Overlay](overlay.md).
+`Spellwire.start(options)` owns host load, automatic permission preparation, start, optional watch, state-driven overlay, and safe shutdown. `options.overlay(state)` receives a shallow named-state snapshot. `refreshOverlay()` supports manual update boundaries and `untilSignal()` closes the overlay before stopping the host.
+
+## Modern overlay
+
+`Overlay.mount(tree, options?)` mounts a retained declarative tree. `ui` exports `row`, `column`, `panel`, `stack`, `frame`, `box`, `text`, `ellipse`, `dot`, `divider`, `badge`, `spacer`, `bind`, and `when`.
+
+Layout props cover numeric/`"fill"` width and height, min/max dimensions, padding, gap, alignment, justification, and offsets. Visual props cover fill, stroke, radius, shadow, inherited opacity, system/monospace family, font size/weight, line height, letter spacing, and text alignment.
+
+`OverlayScene` and `NativeOverlayRenderer` remain the low-level retained API for text/rect/ellipse/line primitives. Pending changes coalesce by node and `apply(scene)` sends one batch. See [State-driven native overlay](overlay.md) for the combined state example and property contracts.
 
 ## Native ABI
 
