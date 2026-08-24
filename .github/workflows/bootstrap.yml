@@ -1,4 +1,4 @@
-name: Materialize source for Spellwire rebrand
+name: Materialize Spellwire source tree
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: spellwire-rebrand-materialize-${{ github.event.pull_request.number || github.ref }}
@@ -21,7 +21,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Expand verified source tree
+      - name: Expand and rebrand verified source tree
         run: python3 .bootstrap/unpack.py
 
       - uses: dtolnay/rust-toolchain@stable
@@ -29,7 +29,7 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Verify materialized source
+      - name: Verify Spellwire workspace
         run: |
           set -euo pipefail
           bun install
@@ -37,18 +37,35 @@ jobs:
           bun run test:ts
           bun run compile:example
           cargo test --workspace
-          cargo build -p rune-native --release
+          cargo build -p spellwire-native --release
+          bun run pack:dry-run
 
-      - name: Pack materialized source
+      - name: Commit clean source to the feature branch
+        if: github.event_name == 'push'
         run: |
           set -euo pipefail
-          rm -rf .git .bootstrap
           rm -f .github/workflows/bootstrap.yml
-          tar -czf /tmp/materialized-source.tar.gz .
+          rm -f examples/*.spellwire.bin examples/*.spellwire.bin.json
+          rm -rf packages/*/dist target
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: rebrand runtime and packages to Spellwire"
+          git push origin HEAD:feat/spellwire-rebrand
+
+      - name: Pack reviewed source
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          rm -rf .git .bootstrap packages/*/dist target
+          rm -f .github/workflows/bootstrap.yml
+          rm -f examples/*.spellwire.bin examples/*.spellwire.bin.json
+          tar -czf /tmp/spellwire-source.tar.gz .
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request'
         with:
-          name: materialized-source
-          path: /tmp/materialized-source.tar.gz
+          name: spellwire-source
+          path: /tmp/spellwire-source.tar.gz
           if-no-files-found: error
           retention-days: 1
