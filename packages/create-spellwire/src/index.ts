@@ -26,9 +26,9 @@ export async function createSpellwireProject(
         private: true,
         type: "module",
         scripts: {
-          build: "spellwire compile src/main.spellwire.ts",
-          typecheck: "tsc --noEmit",
-          check: "bun run typecheck && bun run build",
+          start: "spellwire run",
+          watch: "spellwire watch",
+          build: "spellwire compile src/main.spellwire.ts dist/main.spellwire.bin",
         },
         dependencies: {
           spellwire: "latest",
@@ -75,15 +75,37 @@ export async function createSpellwireProject(
   await Bun.write(
     `${target}/README.md`,
     `# ${basename(target)}\n\n` +
+      `Spellwire compiles realtime handlers to the native VM before live input starts.\n\n` +
       `\`\`\`bash\n` +
-      `bun run typecheck\n` +
+      `# Run once\n` +
+      `bun run start\n\n` +
+      `# Run and reload after source changes\n` +
+      `bun run watch\n\n` +
+      `# Build dist/main.spellwire.bin and its state manifest\n` +
       `bun run build\n` +
-      `\`\`\`\n`,
+      `\`\`\`\n\n` +
+      `Edit \`src/main.spellwire.ts\`. The first live run requests required global ` +
+      `input permissions. Press \`Ctrl+C\` to stop and release held synthetic input.\n`,
   );
-  await Bun.write(`${target}/.gitignore`, "node_modules/\n*.spellwire.bin*\n");
+  await Bun.write(
+    `${target}/README.ko.md`,
+    `# ${basename(target)}\n\n` +
+      `Spellwire는 live input 시작 전에 realtime handler를 native VM으로 컴파일합니다.\n\n` +
+      `\`\`\`bash\n` +
+      `# 한 번 실행\n` +
+      `bun run start\n\n` +
+      `# source 변경을 hot reload하며 실행\n` +
+      `bun run watch\n\n` +
+      `# dist/main.spellwire.bin과 상태 manifest 생성\n` +
+      `bun run build\n` +
+      `\`\`\`\n\n` +
+      `\`src/main.spellwire.ts\`를 편집하십시오. 첫 live run은 필요한 전역 입력 권한을 ` +
+      `요청합니다. \`Ctrl+C\`로 종료하면 눌린 상태의 합성 입력도 해제합니다.\n`,
+  );
+  await Bun.write(`${target}/.gitignore`, "node_modules/\ndist/\n*.spellwire.bin*\n");
 
   if (install) {
-    const child = Bun.spawn(["bun", "install"], {
+    const child = Bun.spawn([process.execPath, "install"], {
       cwd: target,
       stdout: "inherit",
       stderr: "inherit",
@@ -115,7 +137,7 @@ if (import.meta.main) {
         install: !args.includes("--no-install"),
       });
       console.log(`Created Spellwire project at ${target}`);
-      console.log(`Next: cd ${destination} && bun run check`);
+      console.log(`Next: cd ${destination} && bun run start`);
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
       process.exitCode = 1;
