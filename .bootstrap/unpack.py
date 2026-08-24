@@ -48,6 +48,23 @@ with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as bundle:
 workflow.parent.mkdir(parents=True, exist_ok=True)
 workflow.write_bytes(workflow_bytes)
 
+# The archive predates stricter closure-parameter inference in current Rust.
+vm_path = root / "crates" / "rune-core" / "src" / "vm.rs"
+vm = vm_path.read_text(encoding="utf-8")
+vm = vm.replace(
+    "Edge, HandlerTable, InputDevice, InputEvent, Instruction, MouseButton, Opcode, OutputEvent,",
+    "Edge, HandlerTable, InputDevice, InputEvent, MouseButton, Opcode, OutputEvent,",
+)
+vm = vm.replace(
+    "binary!(|left, right| left.wrapping_shl((right as u32) & 63))",
+    "binary!(|left: i64, right: i64| left.wrapping_shl((right as u32) & 63))",
+)
+vm = vm.replace(
+    "binary!(|left, right| left.wrapping_shr((right as u32) & 63))",
+    "binary!(|left: i64, right: i64| left.wrapping_shr((right as u32) & 63))",
+)
+vm_path.write_text(vm, encoding="utf-8")
+
 required = [
     root / "packages" / "compiler" / "src" / "compiler.ts",
     root / "packages" / "sdk" / "src" / "realtime.ts",
