@@ -190,7 +190,7 @@ Run the repeatable control-plane benchmark:
 bun run bench:overlay
 ```
 
-On the development macOS arm64 machine, three isolated runs of a 26-primitive state-bound panel over 20,000 changing snapshots measured 74–76 µs p50, 92–96 µs p95, and 217–234 µs p99 for reconciliation plus mutation publication. This is a local baseline, not a universal compositor-latency claim. Target-machine checks should also record native presentation latency, idle CPU/RSS, and input p99 with overlay off/on.
+On the development macOS arm64 machine, three isolated runs of a 26-primitive state-bound panel over 20,000 changing snapshots measured 71–72 µs p50, 90–92 µs p95, and 213–220 µs p99 for reconciliation plus mutation publication. This is a local baseline, not a universal compositor-latency claim. Target-machine checks should also record native presentation latency, idle CPU/RSS, and input p99 with overlay off/on.
 
 ## Current boundaries
 

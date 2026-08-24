@@ -190,7 +190,7 @@ const overlay = await Overlay.mount(
 bun run bench:overlay
 ```
 
-개발 macOS arm64에서 26 primitive state-bound panel과 20,000개 변경 snapshot을 단독으로 3회 측정한 결과 reconciliation + mutation publication은 74–76 µs p50, 92–96 µs p95, 217–234 µs p99였습니다. 이는 local baseline이며 universal compositor latency 주장이 아닙니다. target machine 검증에서는 native presentation latency, idle CPU/RSS, overlay off/on input p99도 기록해야 합니다.
+개발 macOS arm64에서 26 primitive state-bound panel과 20,000개 변경 snapshot을 단독으로 3회 측정한 결과 reconciliation + mutation publication은 71–72 µs p50, 90–92 µs p95, 213–220 µs p99였습니다. 이는 local baseline이며 universal compositor latency 주장이 아닙니다. target machine 검증에서는 native presentation latency, idle CPU/RSS, overlay off/on input p99도 기록해야 합니다.
 
 ## 현재 경계
 
