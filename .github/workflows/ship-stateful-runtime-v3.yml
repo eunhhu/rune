@@ -1,0 +1,120 @@
+name: Ship hardened stateful runtime to main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/ship_stateful_rt_v3.py"
+      - ".github/workflows/ship-stateful-runtime-v3.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rune-stateful-runtime-main
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Materialize original source when required
+        shell: bash
+        run: |
+          if [[ -f .bootstrap/unpack.py ]]; then
+            python3 .bootstrap/unpack.py
+          fi
+
+      - name: Generate and harden stateful runtime
+        run: python3 tools/ship_stateful_rt_v3.py
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Validate Rust runtime
+        run: |
+          cargo fmt --all
+          cargo test --workspace
+          cargo build -p rune-native --release
+
+      - name: Validate TypeScript compiler
+        run: |
+          bun install
+          bun run typecheck
+          bun run test:ts
+
+      - name: Write verification record
+        shell: bash
+        run: |
+          cat > docs/runtime-verification.md <<EOF
+          # Runtime verification
+
+          The stateful realtime TypeScript runtime was generated and validated before being committed to main.
+
+          Validation performed by this commit:
+
+          - cargo fmt --all
+          - cargo test --workspace
+          - cargo build -p rune-native --release
+          - bun install
+          - bun run typecheck
+          - bun run test:ts
+
+          The follow-up matrix in the same workflow checks the resulting commit on Linux, macOS, and Windows.
+          EOF
+
+      - name: Remove one-shot shipping files
+        run: |
+          rm -f tools/ship_stateful_rt_v2.py tools/ship_stateful_rt_v3.py
+          rm -f .github/workflows/ship-stateful-runtime-v2.yml
+          rm -f .github/workflows/ship-stateful-runtime-v3.yml
+          rmdir tools 2>/dev/null || true
+
+      - name: Commit directly to main
+        id: commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "feat: add stateful realtime TypeScript VM"
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  native-matrix:
+    needs: ship
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ship.outputs.commit }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace
+      - run: cargo build -p rune-native --release
+
+  typescript:
+    needs: ship
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ship.outputs.commit }}
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun run typecheck
+      - run: bun run test:ts
