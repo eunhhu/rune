@@ -9,7 +9,7 @@ Spellwire uses two unscoped npm packages:
 
 ## Preflight
 
-Confirm both names still resolve to 404 before the first release, then run:
+Before the first release, run:
 
 ```bash
 bun install --frozen-lockfile
@@ -25,11 +25,28 @@ cargo clippy --workspace --all-targets --locked
 cargo build --workspace --release --locked
 ```
 
-The package dry run must show only the intended TypeScript source, README, license, and package metadata.
+The package dry run must show only the intended source, README, license, and package metadata.
+
+## npm token for the first publish
+
+npm requires 2FA for package creation/publishing unless the publishing credential is a **granular access token with Bypass 2FA enabled**.
+
+Create an npm granular access token with:
+
+- package permission: **Read and write**;
+- package selection: **All Packages** for the initial publish of a new package name;
+- **Bypass 2FA** enabled;
+- a short expiration appropriate for release automation.
+
+Save that token as the GitHub repository secret `NPM_TOKEN`.
+
+A token can successfully authenticate with `npm whoami` and still fail at `npm publish` if it does not have write permission or Bypass 2FA. The publish workflow therefore has a separate credential preflight and emits the npm error at the package that actually failed.
+
+After the packages exist, migrate to npm Trusted Publishing/OIDC and revoke the long-lived write token when practical.
 
 ## Automated release
 
-Add an npm automation token as the repository secret `NPM_TOKEN`. Then either run **Publish npm packages** manually or push a version tag:
+Either run **Actions → Publish npm packages → Run workflow** on `main`, or push a version tag:
 
 ```bash
 git tag v0.1.0
@@ -41,13 +58,16 @@ The workflow publishes in this order:
 1. `spellwire`
 2. `create-spellwire`
 
-That order matters because newly generated projects depend on `spellwire: latest`.
+That order matters because generated projects depend on `spellwire`.
+
+Publishing is idempotent per package version. If `spellwire@0.1.0` succeeds and `create-spellwire@0.1.0` fails, rerunning the workflow verifies and skips the already-published Spellwire version, then continues with `create-spellwire` instead of failing with a duplicate-version error.
 
 ## Manual release
 
 ```bash
-npm publish --workspace spellwire --provenance --access public
-npm publish --workspace create-spellwire --provenance --access public
+export NODE_AUTH_TOKEN='<npm granular access token>'
+npm publish ./packages/spellwire --provenance --access public
+npm publish ./packages/create-spellwire --provenance --access public
 ```
 
 ## Verify
