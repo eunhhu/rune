@@ -1,0 +1,119 @@
+import { SpscInt32Ring } from "./ring";
+
+export enum InputDevice {
+  Keyboard = 0,
+  MouseButton = 1,
+}
+
+export enum InputEdge {
+  Down = 0,
+  Up = 1,
+}
+
+export enum EventSource {
+  Physical = 0,
+  Synthetic = 1,
+}
+
+export interface InputEvent {
+  device: InputDevice;
+  code: number;
+  edge: InputEdge;
+  source: EventSource;
+  timestampLo: number;
+  timestampHi: number;
+}
+
+export type InputHandler = (event: InputEvent) => void;
+
+const EVENT_WORDS = 6;
+
+/**
+ * Best-effort JavaScript lane. A native producer writes fixed records to this ring;
+ * a dedicated Bun worker can drain it without a native-to-JS callback per event.
+ */
+export class DynamicInputLane {
+  readonly ring: SpscInt32Ring;
+  readonly #handlers: InputHandler[][];
+  readonly #record = new Int32Array(EVENT_WORDS);
+  readonly #event: InputEvent = {
+    device: InputDevice.Keyboard,
+    code: 0,
+    edge: InputEdge.Down,
+    source: EventSource.Physical,
+    timestampLo: 0,
+    timestampHi: 0,
+  };
+
+  constructor(capacity = 1024, buffer?: SharedArrayBuffer) {
+    this.ring = new SpscInt32Ring(capacity, EVENT_WORDS, buffer);
+    this.#handlers = Array.from({ length: 2 * 2 * 256 }, () => []);
+  }
+
+  on(device: InputDevice, code: number, edge: InputEdge, handler: InputHandler): () => void {
+    const bucket = this.#bucket(device, code, edge);
+    const handlers = this.#handlers[bucket];
+    if (!handlers) {
+      throw new RangeError("input code is outside the dynamic lane range");
+    }
+    handlers.push(handler);
+    return () => {
+      const index = handlers.indexOf(handler);
+      if (index >= 0) handlers.splice(index, 1);
+    };
+  }
+
+  drain(maxEvents = 1024): number {
+    let count = 0;
+    while (count < maxEvents && this.ring.pop(this.#record)) {
+      this.#event.device = this.#record[0] as InputDevice;
+      this.#event.code = this.#record[1] ?? 0;
+      this.#event.edge = this.#record[2] as InputEdge;
+      this.#event.source = this.#record[3] as EventSource;
+      this.#event.timestampLo = this.#record[4] ?? 0;
+      this.#event.timestampHi = this.#record[5] ?? 0;
+      const handlers = this.#handlers[
+        this.#bucket(this.#event.device, this.#event.code, this.#event.edge)
+      ];
+      if (handlers) {
+        // Copying the handler list would allocate. Mutation during dispatch is documented
+        // to affect only subsequent events.
+        for (let index = 0; index < handlers.length; index += 1) {
+          handlers[index]?.(this.#event);
+        }
+      }
+      count += 1;
+    }
+    return count;
+  }
+
+  #bucket(device: InputDevice, code: number, edge: InputEdge): number {
+    if (!Number.isInteger(code) || code < 0 || code >= 256) return -1;
+    return (device * 2 + edge) * 256 + code;
+  }
+}
+
+export interface NativeStateBridge {
+  getState(slot: number): bigint;
+  setState(slot: number, value: bigint): void;
+}
+
+export class NativeState<T extends number | boolean = number> {
+  constructor(
+    readonly slot: number,
+    readonly kind: "number" | "boolean",
+    private readonly bridge: NativeStateBridge,
+  ) {}
+
+  get(): T {
+    const value = this.bridge.getState(this.slot);
+    return (this.kind === "boolean" ? value !== 0n : Number(value)) as T;
+  }
+
+  set(value: T): void {
+    this.bridge.setState(
+      this.slot,
+      this.kind === "boolean" ? (value ? 1n : 0n) : BigInt(Math.trunc(value as number)),
+    );
+  }
+}

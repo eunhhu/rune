@@ -1,146 +1,90 @@
-# Rune
+# Spellwire
 
-Rune is a native realtime input automation runtime with a TypeScript scripting SDK.
+Spellwire is a low-latency desktop automation runtime whose scripting language is TypeScript.
 
-TypeScript is the authoring language, but latency-sensitive handlers do **not** run as JavaScript callbacks on every input event. Rune supports both a simple macro builder and a stateful realtime TypeScript subset compiled into a native Rust VM.
-
-> Early MVP. Input runtime and stateful RT execution are the current focus; the native overlay renderer is still under construction.
-
-## Quick Start
-
-Requirements: Bun 1.3.14+ and Rust 1.81+.
-
-```bash
-git clone https://github.com/eunhhu/rune.git
-cd rune
-bun install
-cargo build -p rune-native --release
-bun run example:lunge
-```
-
-Or create `macro.ts`:
+The important distinction is that Spellwire does **not** send every physical input through a JavaScript callback. Normal TypeScript used inside a realtime handler is compiled ahead of time to compact native bytecode. Persistent state, branches, loops, helper functions, deadlines, and key/mouse output then execute in Rust on the input path.
 
 ```ts
-import { Key, MouseButton, macro, rune } from "@rune/sdk";
+import { Key, MouseButton, clickMouse, keyDown, keyUp, rt, sleepUs } from "spellwire";
 
-const lunge = macro("lunge", (m) => {
-  m.on.keyDown(Key.Q).run(
-    m.key.down(Key.E),
-    m.mouse.down(MouseButton.Left),
-    m.delay.us(80),
-    m.mouse.up(MouseButton.Left),
-    m.key.up(Key.E),
-  );
-});
+let phase = 0;          // persistent native state
+let enabled = true;     // persistent native state
 
-rune.load(lunge).start();
-```
-
-```bash
-bun macro.ts
-```
-
-Full setup, permissions, and first-run instructions: **[Quick Start](docs/quick-start.md)**.
-
-## Stateful realtime TypeScript
-
-The reason Rune uses TypeScript is not only syntax. Stateful macros can keep variables across events and use conditions, loops, and functions while still avoiding JS execution on the input hot path.
-
-```ts
-import { Key, delay, held, key, on, rt } from "@rune/sdk";
-
-rt.load(() => {
-  let combo = 0;
-
-  function burst(count: number) {
-    for (let i = 0; i < count; i++) {
-      key.tap(Key.E);
-      delay.us(40);
-    }
+function burst(key: Key, count: number): void {
+  for (let index = 0; index < count; index++) {
+    keyDown(key);
+    keyUp(key);
   }
+}
 
-  on.keyDown(Key.Q, () => {
-    combo++;
+rt.onKeyDown(Key.Q, () => {
+  if (!enabled) return;
 
-    if (combo >= 3 && held(Key.LeftShift)) {
-      burst(2);
-      combo = 0;
-    }
-  });
+  phase = (phase + 1) % 3;
+  burst(Key.E, phase + 1);
+
+  if (phase === 2) {
+    clickMouse(MouseButton.Left);
+    sleepUs(80);
+  }
 });
 ```
 
-`combo`, the branch, the loop, and the function execute in Rune's native VM. Bun remains the unrestricted control plane for configuration, networking, disk I/O, UI state, plugins, and hot reload.
+The callback above is parsed at build/load time. It is not invoked by Bun when `Q` is pressed.
 
-Read **[TypeScript Runtime](docs/typescript-runtime.md)** for the execution model and supported subset.
+## Execution lanes
 
-## Architecture
+Spellwire deliberately has two lanes:
+
+- **Realtime AOT lane:** analyzable TypeScript is lowered to a fixed-width native instruction stream. There is no JS callback, promise, allocation, hash lookup, or event-loop hop per input event.
+- **Dynamic Bun lane:** arbitrary TypeScript, objects, async I/O, plugins, configuration, and UI logic remain in Bun. Native input records can be delivered through a preallocated `SharedArrayBuffer` SPSC ring rather than a native-to-JS callback.
+
+This split keeps TypeScript expressive without pretending arbitrary JavaScript has deterministic microsecond tail latency. See [the TypeScript runtime design](docs/typescript-runtime.md).
+
+## Workspace
 
 ```text
-Bun / TypeScript application
-   │
-   ├─ normal TS                configuration / I/O / UI / plugins
-   │
-   ├─ macro(...)              compile-time flat native program
-   │
-   └─ rt.load(...)            stateful TS → native bytecode
-                               │
-                               ▼
-                       Rust realtime runtime
-                 ┌───────────────────────────────┐
-physical input → │ trigger LUT → VM → injection │ → OS input stream
-                 └───────────────────────────────┘
+crates/spellwire-core/       versioned bytecode, trigger table, persistent state VM
+crates/spellwire-native/     stable C ABI between Bun/native hosts and spellwire-core
+crates/spellwire-bench/      percentile benchmark for trigger lookup + VM dispatch
+packages/sdk/           TypeScript API, dynamic event lane, retained overlay scene
+packages/compiler/      TypeScript AST → Spellwire bytecode compiler and CLI
+examples/               stateful TypeScript macros
 ```
 
-The intended hot path has no per-event JavaScript callback, Promise, async runtime, or hash-table lookup.
+## Build
 
-## Platform backends
+Requirements:
 
-| Platform | Observe | Inject | Status |
-| --- | --- | --- | --- |
-| Windows | native global input backend | `SendInput` | MVP |
-| macOS | `CGEventTap` | `CGEventPost` | MVP |
-| Linux | evdev | uinput | MVP |
-
-Scripts use Rune/USB-HID-style key identifiers instead of platform-specific scan codes.
-
-See **[Platform Notes](docs/platforms.md)** for permissions and limitations.
-
-## Documentation
-
-- [Quick Start](docs/quick-start.md) — fresh clone to first macro
-- [API Reference](docs/api.md) — macro builder, runtime, keys, mouse
-- [TypeScript Runtime](docs/typescript-runtime.md) — persistent state, conditions, loops, functions
-- [Architecture](docs/architecture.md) — control plane vs realtime plane
-- [Platform Notes](docs/platforms.md) — Windows/macOS/Linux backends
-- [Overlay](docs/overlay.md) — retained native overlay design
-- [Troubleshooting](docs/troubleshooting.md) — permissions, native loading, timing issues
-- [Status](docs/status.md) — implemented vs not-yet-claimed features
-
-## Development
+- Rust stable (MSRV 1.81)
+- Bun
 
 ```bash
 bun install
-cargo test --workspace
-cargo build -p rune-native --release
 bun run typecheck
 bun run test:ts
+cargo test --workspace
+cargo build -p spellwire-native --release
 ```
 
-Run the native core benchmark:
+Compile an example:
 
 ```bash
-bun run bench
+bun run compile:example
 ```
 
-Rune does not currently claim a guaranteed physical-switch-to-application microsecond latency. Performance work is measured at the framework boundary using percentile/jitter distributions; USB polling, OS scheduling, and target-application polling are outside that boundary.
+That writes a `.spellwire.bin` bytecode module and a state manifest next to the source file.
 
-## Overlay
+## Performance contract
 
-The overlay is isolated from input execution and is designed as a retained native scene handed to a dedicated renderer thread. Rune will not introduce Electron/webview rendering into the realtime runtime just for convenience.
+Spellwire measures separate boundaries instead of advertising an ambiguous “input latency” number:
 
-See [Overlay](docs/overlay.md).
+1. OS event visible to Spellwire → trigger resolved
+2. trigger resolved → native output submission
+3. deadline overshoot and p50/p95/p99/p99.9 jitter
 
-## License
+USB polling, physical switch debounce, target-application polling, compositor policy, and display latency are reported separately. The repository includes a core VM benchmark, but Spellwire does not claim cross-platform microsecond end-to-end latency until each native backend is measured on real hardware.
 
-MIT
+## Platform and overlay status
+
+The current main branch contains the portable compiler, runtime VM, C ABI, dynamic JS lane, and retained overlay scene model. Direct Windows/macOS/Linux input and transparent native overlay backends are isolated behind the native boundary and are not marked complete until their permission, recursion, and latency behavior is validated per platform. See [implementation status](docs/status.md) and [overlay design](docs/overlay.md).

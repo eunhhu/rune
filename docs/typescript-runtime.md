@@ -1,152 +1,48 @@
-# TypeScript Runtime
+# TypeScript execution model
 
-Rune uses TypeScript in two different roles.
+Spellwire is not a callback wrapper around a generic automation package. It has two TypeScript execution lanes because full JavaScript semantics and predictable microsecond-scale dispatch are different constraints.
 
-- **Control plane:** normal Bun/TypeScript with the full language and ecosystem.
-- **Realtime plane:** a constrained TypeScript subset compiled ahead of time into native Rune bytecode.
+## Realtime AOT lane
 
-The split exists so stateful macros can still use familiar TypeScript syntax without paying JavaScript callback, GC, event-loop, or native-boundary costs for every input event.
+Handlers registered with `rt.onKeyDown`, `rt.onKeyUp`, `rt.onMouseDown`, and `rt.onMouseUp` are parsed from TypeScript and lowered to Spellwire bytecode before the input runtime starts.
 
-## Persistent state
+Inside those handlers Spellwire currently supports ordinary TypeScript syntax for:
 
-Top-level mutable variables declared inside `rt.load()` become persistent native slots.
+- persistent module-scope integer and boolean variables
+- local variables and assignments
+- `if` / `else` and conditional expressions
+- `for`, `while`, and `do` loops with `break` / `continue`
+- integer arithmetic, comparisons, bit operations, and boolean short-circuiting
+- top-level helper functions with parameters, inlined at compile time
+- key/mouse output, held-key queries, and microsecond deadlines
+
+The native VM owns captured state. An input dispatch therefore performs no native-to-JavaScript callback, JS allocation, promise scheduling, or property lookup.
 
 ```ts
-rt.load(() => {
-  let phase = 0;
+let phase = 0;
 
-  on.keyDown(Key.Q, () => {
-    phase = (phase + 1) % 3;
-  });
+function burst(count: number): void {
+  for (let i = 0; i < count; i++) tapKey(Key.E);
+}
+
+rt.onKeyDown(Key.Q, () => {
+  phase = (phase + 1) % 3;
+  if (phase !== 0) burst(phase);
 });
 ```
 
-The value survives after the handler returns and is reused on the next input event.
+This is TypeScript syntax, but not every JavaScript value can be represented in the realtime VM. Objects, strings, closures over dynamic objects, exceptions, promises, recursion, and unbounded platform APIs stay out of this lane. The compiler reports a source-positioned error when realtime code captures an unsupported value. Every handler also has a native instruction budget so a bad loop cannot permanently occupy the input thread.
 
-## Conditions
+## Dynamic Bun lane
 
-```ts
-if (held(Key.LeftShift) && phase === 2) {
-  key.tap(Key.E);
-} else {
-  key.tap(Key.R);
-}
-```
+The rest of the module remains ordinary TypeScript running in Bun. This lane is for configuration, files, networking, UI orchestration, plugins, complex objects, async work, and observability.
 
-Boolean, arithmetic, comparison, and common bitwise expressions compile to native VM operations.
+Dynamic input subscriptions use a fixed-record `SharedArrayBuffer` SPSC ring. A dedicated worker drains the ring instead of invoking a JavaScript callback directly from the native input thread. This lowers overhead and isolates the native producer, but it is still best-effort JavaScript and does not carry Spellwire's realtime latency contract.
 
-## Loops
+## State boundary
 
-```ts
-for (let i = 0; i < 4; i++) {
-  key.tap(Key.E);
-  delay.us(40);
-}
-```
+Realtime state is persistent across handler invocations and is addressable from the control plane through generated state metadata and the native `state_get` / `state_set` ABI. A future source transform can rewrite dynamic references to captured variables automatically; the initial ABI exposes explicit state handles so synchronization is never implicit or racy.
 
-Runtime-dependent `while` and `do/while` loops are supported by the bytecode control-flow layer. Each handler is subject to an instruction budget so an accidental infinite loop cannot permanently occupy the realtime thread.
+## Why not execute arbitrary Bun callbacks on the hot path?
 
-## Functions
-
-```ts
-function burst(keyCode: number, count: number) {
-  for (let i = 0; i < count; i++) {
-    key.tap(keyCode);
-  }
-}
-```
-
-Functions compile into native bytecode functions with fixed stack/call limits rather than JavaScript calls at event time.
-
-## Realtime intrinsics
-
-The realtime compiler recognizes Rune-provided intrinsics instead of arbitrary JavaScript APIs.
-
-```ts
-key.down(Key.E)
-key.up(Key.E)
-key.tap(Key.E)
-mouse.down(MouseButton.Left)
-mouse.up(MouseButton.Left)
-mouse.click(MouseButton.Left)
-mouse.move(5, -2)
-mouse.wheel(0, 1)
-delay.us(75)
-held(Key.LeftShift)
-```
-
-## Deliberately unsupported on the realtime plane
-
-The realtime compiler rejects or excludes features whose semantics require an unconstrained JavaScript runtime or unpredictable allocation:
-
-- `async` / `await`
-- `Promise`
-- network or filesystem I/O
-- arbitrary npm calls
-- dynamic object/array construction on the hot path
-- exceptions as a general control-flow mechanism
-- generators
-- dynamic property lookup
-- runtime-created closures
-
-Use ordinary Bun code outside `rt.load()` for those features.
-
-## Why not just run Bun callbacks?
-
-A conventional global-input library usually follows this path:
-
-```text
-native input thread
-  → JS callback scheduling
-  → JavaScript condition/state logic
-  → FFI/N-API call
-  → native injection
-```
-
-Rune's realtime path is instead:
-
-```text
-native input event
-  → trigger lookup
-  → native state/bytecode
-  → native injection batch
-```
-
-That removes runtime-to-runtime round trips from latency-sensitive execution while preserving TypeScript as the authoring language.
-
-## Resource limits
-
-Rune intentionally uses bounded execution structures. Exact limits may evolve before a stable release, but the model is fixed-capacity rather than dynamically growing on every event:
-
-- bounded VM value stack
-- bounded local slots
-- bounded function call depth
-- bounded native output batch
-- per-handler instruction budget
-
-Exceeding a limit causes the handler to stop/fail rather than silently allocating an unbounded structure on the realtime thread.
-
-## Choosing the right layer
-
-Use normal Bun/TypeScript for:
-
-- configuration
-- persistent storage on disk
-- networking
-- hot reload
-- logging
-- overlay application state
-- plugins
-- profile selection
-
-Use realtime TypeScript for:
-
-- state transitions tied to input
-- combo counters
-- tap/hold state machines
-- conditional sequences
-- small loops
-- input-sensitive functions
-- timing-critical dispatch
-
-A useful mental model is: **Bun owns the application; Rune VM owns the input interrupt path.**
+Bun is fast, but event-loop scheduling, garbage collection, deoptimisation, and native-to-JS transitions introduce tail latency. They are acceptable for control work and unacceptable as the only path for a macro that advertises microsecond-scale dispatch. Spellwire therefore optimizes TypeScript by moving analyzable hot code into a small native machine while retaining Bun for the language features that genuinely need JavaScript.

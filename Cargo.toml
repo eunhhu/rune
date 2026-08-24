@@ -1,8 +1,8 @@
 [workspace]
 members = [
-  "crates/rune-core",
-  "crates/rune-native",
-  "crates/rune-bench",
+  "crates/spellwire-core",
+  "crates/spellwire-native",
+  "crates/spellwire-bench",
 ]
 resolver = "2"
 
@@ -10,7 +10,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/eunhhu/rune"
+repository = "https://github.com/eunhhu/spellwire"
 authors = ["Sunwoo Moon"]
 rust-version = "1.81"
 

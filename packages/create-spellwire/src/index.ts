@@ -1,0 +1,8 @@
+#!/usr/bin/env bun
+import { existsSync } from "node:fs"; import { basename, resolve } from "node:path";
+export async function createSpellwireProject(destination="spellwire-macro",install=true){const target=resolve(destination);if(existsSync(target))throw new Error(`destination already exists: ${target}`);
+await Bun.write(`${target}/package.json`,JSON.stringify({name:basename(target),private:true,type:"module",scripts:{build:"spellwire compile src/main.spellwire.ts",check:"tsc --noEmit"},dependencies:{spellwire:"latest"},devDependencies:{"@types/bun":"latest",typescript:"^5.8.3"}},null,2)+"\n");
+await Bun.write(`${target}/tsconfig.json`,JSON.stringify({compilerOptions:{target:"ES2022",module:"ESNext",moduleResolution:"Bundler",strict:true,noEmit:true,types:["bun"]},include:["src/**/*.ts"]},null,2)+"\n");
+await Bun.write(`${target}/src/main.spellwire.ts`,`import { Key, keyDown, keyUp, rt } from "spellwire";\nlet count=0;\nrt.onKeyDown(Key.Q,()=>{count++;keyDown(Key.E);keyUp(Key.E);});\n`); await Bun.write(`${target}/.gitignore`,"node_modules/\n*.spellwire.bin*\n");
+if(install){const process=Bun.spawn(["bun","install"],{cwd:target,stdout:"inherit",stderr:"inherit"});if(await process.exited!==0)throw new Error("bun install failed");}return target;}
+if(import.meta.main){const args=Bun.argv.slice(2), noInstall=args.includes("--no-install"), destination=args.find(a=>!a.startsWith("-"))??"spellwire-macro";try{const target=await createSpellwireProject(destination,!noInstall);console.log(`Created Spellwire project at ${target}`);}catch(error){console.error(error instanceof Error?error.message:error);process.exit(1);}}

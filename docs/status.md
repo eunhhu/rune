@@ -1,27 +1,30 @@
 # Implementation status
 
-Rune is currently an early native runtime MVP.
+## Implemented on `main`
 
-## Implemented
+- normal TypeScript syntax for realtime handlers
+- module-scope persistent integer/boolean state
+- `if` / `else`, conditional expressions, `for`, `while`, `do`, `break`, and `continue`
+- arithmetic, comparisons, boolean short-circuiting, and bit operations
+- compile-time inlining of top-level helper functions with parameters
+- versioned fixed-width bytecode encoder/decoder
+- fixed trigger table with physical/synthetic/any filters
+- allocation-free VM dispatch scratch, output batching, and instruction budgets
+- absolute monotonic delay scheduling with a configurable spin tail
+- C ABI for load, dispatch, state access, and output submission
+- SharedArrayBuffer SPSC ring for the best-effort Bun event lane
+- retained overlay scene model
+- compiler, SDK, VM tests, and a percentile benchmark harness
 
-- TypeScript macro builder and versioned binary encoder
-- Bun FFI control plane
-- allocation-free native trigger lookup and execution scratch
-- physical, synthetic, and any-source trigger filters
-- native key and mouse dispatch batches
-- Windows hook and `SendInput` backend
-- macOS event tap and `CGEventPost` backend
-- Linux evdev and uinput backend
-- renderer-independent overlay scene model
-- Rust and TypeScript tests
-- cross-platform build workflow
+## Deliberately not claimed yet
 
-## Not yet claimed
+- arbitrary JavaScript semantics inside the realtime lane
+- hard-realtime guarantees from a general-purpose desktop OS
+- measured cross-platform microsecond end-to-end latency
+- validated direct OS observation/injection backends on all three platforms
+- a transparent native overlay renderer
+- automatic source rewriting of dynamic Bun references to captured native state
+- complete international/vendor-specific HID mappings
+- release signing and prebuilt native binaries
 
-- measured microsecond latency targets
-- a realtime scheduling guarantee from general-purpose desktop operating systems
-- a native transparent overlay window/render backend
-- complete international and vendor-specific keyboard mappings
-- prebuilt release artifacts and code signing
-
-Benchmarks will report percentile distributions and jitter per backend before Rune publishes performance claims.
+Spellwire should not set a capability bit or publish a latency number before the corresponding backend is tested on actual hardware.

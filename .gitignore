@@ -1,7 +1,13 @@
-/target/
-/node_modules/
-.DS_Store
-*.log
+/target
+/node_modules
+/dist
+*.rbc
 *.dll
 *.dylib
 *.so
+.DS_Store
+
+**/dist/
+*.tsbuildinfo
+*.spellwire.bin
+*.spellwire.bin.json
