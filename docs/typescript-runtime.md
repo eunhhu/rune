@@ -1,152 +1,179 @@
 # TypeScript Runtime
 
-Rune uses TypeScript in two different roles.
+Rune uses TypeScript as an authoring language and compiles the latency-sensitive subset ahead of time. A source file does not need a wrapper such as `rt.load()`; the `.rune.ts` module itself is the compilation unit.
 
-- **Control plane:** normal Bun/TypeScript with the full language and ecosystem.
-- **Realtime plane:** a constrained TypeScript subset compiled ahead of time into native Rune bytecode.
+## Compilation boundary
 
-The split exists so stateful macros can still use familiar TypeScript syntax without paying JavaScript callback, GC, event-loop, or native-boundary costs for every input event.
+The compiler scans the module for top-level calls to:
+
+```ts
+rt.onKeyDown(...)
+rt.onKeyUp(...)
+rt.onMouseDown(...)
+rt.onMouseUp(...)
+```
+
+Only code needed by those handlers is lowered to native bytecode. Other top-level TypeScript may coexist as control-plane code, but a handler cannot capture a dynamic value that the compiler cannot represent.
 
 ## Persistent state
 
-Top-level mutable variables declared inside `rt.load()` become persistent native slots.
+A module-scope mutable `let` initialized to a compile-time integer or boolean becomes a persistent native state slot when a realtime handler references it.
 
 ```ts
-rt.load(() => {
-  let phase = 0;
+let phase = 0;
+let enabled = true;
 
-  on.keyDown(Key.Q, () => {
-    phase = (phase + 1) % 3;
-  });
+rt.onKeyDown(Key.Q, () => {
+  if (enabled) phase = (phase + 1) % 3;
 });
 ```
 
-The value survives after the handler returns and is reused on the next input event.
+The state survives after the handler returns. The generated `.rune.bin.json` manifest maps each source name to its native slot and kind.
 
-## Conditions
+Module-scope `const` declarations are folded as compile-time constants when possible.
+
+Rune numbers on the realtime plane are signed 64-bit integers. Numeric literals must be safe JavaScript integers at compile time. Booleans are represented as native integer truth values.
+
+## Handler-local variables
+
+Handler and helper-function locals compile to fixed VM local slots:
 
 ```ts
-if (held(Key.LeftShift) && phase === 2) {
-  key.tap(Key.E);
+rt.onKeyDown(Key.Q, () => {
+  let count = phase + 1;
+  count *= 2;
+  tapKey(Key.E);
+});
+```
+
+Destructuring and dynamically sized local containers are not supported.
+
+## Conditions and expressions
+
+The compiler supports the integer/boolean operations needed for state machines, including:
+
+- arithmetic and remainder;
+- comparison and equality;
+- logical short-circuit expressions;
+- bitwise operations and shifts;
+- prefix unary operations;
+- assignment and compound assignment;
+- prefix/postfix increment and decrement.
+
+```ts
+if (enabled && phase >= 2 && !keyHeld(Key.LeftShift)) {
+  tapKey(Key.E);
 } else {
-  key.tap(Key.R);
+  tapKey(Key.R);
 }
 ```
 
-Boolean, arithmetic, comparison, and common bitwise expressions compile to native VM operations.
+Unsupported expressions fail compilation with a source-position diagnostic instead of falling back silently to JavaScript.
 
 ## Loops
 
+Supported loop forms:
+
 ```ts
-for (let i = 0; i < 4; i++) {
-  key.tap(Key.E);
-  delay.us(40);
+for (let index = 0; index < count; index++) {
+  tapKey(Key.E);
 }
+
+while (enabled) {
+  break;
+}
+
+do {
+  phase++;
+} while (phase < 3);
 ```
 
-Runtime-dependent `while` and `do/while` loops are supported by the bytecode control-flow layer. Each handler is subject to an instruction budget so an accidental infinite loop cannot permanently occupy the realtime thread.
+`break` and `continue` are supported. Every handler has an instruction budget, so an accidental infinite loop fails rather than running without a bound.
 
-## Functions
+## Helper functions
+
+Top-level helper functions called by handlers are compiled inline:
 
 ```ts
-function burst(keyCode: number, count: number) {
-  for (let i = 0; i < count; i++) {
-    key.tap(keyCode);
+function tapRepeated(key: Key, count: number): void {
+  for (let index = 0; index < count; index++) {
+    keyDown(key);
+    keyUp(key);
   }
 }
 ```
 
-Functions compile into native bytecode functions with fixed stack/call limits rather than JavaScript calls at event time.
+Current restrictions:
+
+- helper functions return `void` only;
+- arguments must lower to integer values;
+- functions are inlined rather than dynamically dispatched;
+- recursion is rejected;
+- runtime-created closures are not supported.
+
+Inlining removes a per-event JavaScript or VM function-call boundary, but it can increase bytecode size.
 
 ## Realtime intrinsics
 
-The realtime compiler recognizes Rune-provided intrinsics instead of arbitrary JavaScript APIs.
-
 ```ts
-key.down(Key.E)
-key.up(Key.E)
-key.tap(Key.E)
-mouse.down(MouseButton.Left)
-mouse.up(MouseButton.Left)
-mouse.click(MouseButton.Left)
-mouse.move(5, -2)
-mouse.wheel(0, 1)
-delay.us(75)
-held(Key.LeftShift)
+keyDown(Key.E)
+keyUp(Key.E)
+tapKey(Key.E)
+mouseDown(MouseButton.Left)
+mouseUp(MouseButton.Left)
+clickMouse(MouseButton.Left)
+moveMouse(4, -2)
+wheelMouse(0, 1)
+sleepUs(75)
+keyHeld(Key.LeftShift)
+mouseHeld(MouseButton.Right)
 ```
 
-## Deliberately unsupported on the realtime plane
+The compiler recognizes these functions by name and emits native opcodes.
 
-The realtime compiler rejects or excludes features whose semantics require an unconstrained JavaScript runtime or unpredictable allocation:
+## Delay behavior
 
-- `async` / `await`
-- `Promise`
-- network or filesystem I/O
-- arbitrary npm calls
-- dynamic object/array construction on the hot path
-- exceptions as a general control-flow mechanism
-- generators
-- dynamic property lookup
-- runtime-created closures
+`sleepUs(n)` flushes the pending output batch and advances an absolute monotonic deadline. The runtime sleeps until the configured spin tail, then actively spins for the remaining interval.
 
-Use ordinary Bun code outside `rt.load()` for those features.
+The current VM executes delays synchronously on the dispatching thread. A preallocated continuation/deadline scheduler is planned so long macro waits can yield without blocking input observation.
 
-## Why not just run Bun callbacks?
+Desktop operating systems are not hard realtime schedulers; microsecond syntax is a requested deadline, not a guarantee that physical end-to-end latency has the same precision.
 
-A conventional global-input library usually follows this path:
+## Deliberately unsupported
 
-```text
-native input thread
-  → JS callback scheduling
-  → JavaScript condition/state logic
-  → FFI/N-API call
-  → native injection
-```
+The realtime compiler rejects or excludes features that require an unconstrained JavaScript runtime or unpredictable allocation:
 
-Rune's realtime path is instead:
+- floating-point semantics as a separate type;
+- strings in realtime expressions;
+- dynamic objects, arrays, maps, and sets;
+- destructuring;
+- `async`, `await`, and `Promise`;
+- exceptions as general control flow;
+- generators;
+- arbitrary npm/Bun APIs;
+- network or filesystem I/O;
+- dynamic property access;
+- runtime-created closures;
+- non-void helper returns.
 
-```text
-native input event
-  → trigger lookup
-  → native state/bytecode
-  → native injection batch
-```
-
-That removes runtime-to-runtime round trips from latency-sensitive execution while preserving TypeScript as the authoring language.
+Move such work to ordinary Bun code and exchange only bounded state/configuration with the native host.
 
 ## Resource limits
 
-Rune intentionally uses bounded execution structures. Exact limits may evolve before a stable release, but the model is fixed-capacity rather than dynamically growing on every event:
+Current defaults and caps:
 
-- bounded VM value stack
-- bounded local slots
-- bounded function call depth
-- bounded native output batch
-- per-handler instruction budget
+| Resource | Value |
+| --- | ---: |
+| Default stack limit | 128 values |
+| Native maximum stack | 256 values |
+| Native maximum locals | 256 values |
+| Native output batch | 64 events |
+| Default instruction budget | 100,000 instructions/handler |
 
-Exceeding a limit causes the handler to stop/fail rather than silently allocating an unbounded structure on the realtime thread.
+Programs are validated before dispatch. Invalid jumps, slots, entries, limits, and empty programs are rejected during loading.
 
-## Choosing the right layer
+## Fallback execution
 
-Use normal Bun/TypeScript for:
+Executing a `.rune.ts` module directly with Bun records the `rt.on*` registrations in a JavaScript fallback list. With `withRealtimeActionSink()`, tests can call those handlers and observe their actions.
 
-- configuration
-- persistent storage on disk
-- networking
-- hot reload
-- logging
-- overlay application state
-- plugins
-- profile selection
-
-Use realtime TypeScript for:
-
-- state transitions tied to input
-- combo counters
-- tap/hold state machines
-- conditional sequences
-- small loops
-- input-sensitive functions
-- timing-critical dispatch
-
-A useful mental model is: **Bun owns the application; Rune VM owns the input interrupt path.**
+That fallback preserves useful semantics for debugging, but it is not the native AOT path and carries no realtime latency guarantee.

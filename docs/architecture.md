@@ -1,72 +1,119 @@
 # Architecture
 
-Rune is split into a control plane and a realtime plane. The boundary is intentional: TypeScript is an excellent language for describing automation, but a JavaScript event loop is not an appropriate latency boundary for every physical key event.
+Rune is currently composed of five explicit layers: TypeScript SDK, AOT compiler, versioned wire format, native VM, and host boundary.
 
-## Control plane
+## 1. TypeScript SDK
 
-Bun executes the user's TypeScript file once. `macro(name, builder)` records rules and actions as plain immutable data. `@rune/sdk` validates that data and serializes it into the versioned `RUNE` wire format.
+`@rune/sdk` supplies:
 
-The control plane may allocate. It may read configuration, hot-reload a script, print diagnostics, or build overlay state. None of those operations occur in response to an input event.
+- USB HID-style `Key` identifiers and mouse buttons;
+- top-level `rt.on*` handler markers;
+- output and held-input intrinsics;
+- JavaScript fallback registrations/action sinks;
+- a SharedArrayBuffer SPSC dynamic input lane;
+- native state wrappers;
+- a retained overlay scene model.
 
-The current bridge is a small C ABI loaded through `bun:ffi`. The bridge is replaceable: a future Node-API wrapper or another language binding can load the same binary IR without changing the core runtime.
+The handler markers are ordinary TypeScript functions when executed by Bun, which makes source files testable. The compiler recognizes the same call shapes and does not depend on executing the module to discover handlers.
 
-## Realtime plane
+## 2. AOT compiler
 
-`rune-native` decodes the IR before starting an input backend. `rune-core::ProgramSet` compiles triggers into fixed slots:
-
-```text
-source × device × edge × code → contiguous program-id bucket
-```
-
-Dispatching an event performs direct indexing and iterates a precomputed contiguous ID slice. It does not hash strings, parse script objects, allocate, or call JavaScript.
-
-Each backend owns an `ExecutionScratch` with a fixed 64-event output array. Actions with no delay are accumulated and submitted to the platform injector as one batch when the platform API permits it.
-
-## Delay semantics
-
-A macro begins with a monotonic deadline equal to its start time. Every `delay.us(n)` advances that deadline by `n` microseconds. Rune waits until the absolute deadline rather than sleeping for `n` microseconds relative to the end of the previous operation.
-
-That prevents scheduler and injection overhead from accumulating as drift across a long sequence:
+`@rune/compiler` parses TypeScript with the TypeScript compiler API, collects representable module state, finds top-level realtime registrations, resolves constants, validates the supported subset, and lowers handlers to an integer bytecode instruction stream.
 
 ```text
-target += 100 us
-target += 100 us
-target += 100 us
+module-scope let/const
+handler callback
+helper functions
+control flow + expressions
+          │
+          ▼
+ states + handler table + bytecode + resource limits
 ```
 
-For waits longer than `spinThresholdUs`, the input thread sleeps until the final tail. The remaining tail is actively spun. A larger spin threshold can reduce overshoot but consumes a CPU core for longer, so the native API rejects values above 5 ms.
+Compilation happens once. No AST, source string, or TypeScript runtime is needed during native dispatch.
 
-## Batching
+## 3. Wire format
 
-A sequence such as:
+The encoder writes a versioned `RUNE` binary containing:
 
-```ts
-m.key.down(Key.E),
-m.mouse.down(MouseButton.Left),
-m.mouse.up(MouseButton.Left),
-m.key.up(Key.E),
+- header/version and resource limits;
+- initial persistent-state values;
+- triggers and bytecode entry points;
+- fixed-width instructions.
+
+`rune-core::Program::decode` validates structural bounds before `Runtime::new` validates entries, jumps, state/local slots, stack limits, and instruction budgets.
+
+The companion JSON manifest is control-plane metadata; it is not read on the native input path.
+
+## 4. Native VM
+
+The runtime builds a fixed trigger table indexed by source, device, edge, and code. Dispatch performs direct indexing into contiguous handler-ID buckets.
+
+```text
+explicit InputEvent
+      │
+      ▼
+update held-input bitmap
+      │
+      ▼
+source × device × edge × code lookup
+      │
+      ▼
+prevalidated integer VM
+      │
+      ▼
+fixed 64-event output batches
 ```
 
-becomes one fixed native batch. On Windows that maps to one `SendInput` call. On Linux it maps to a contiguous set of `input_event` records followed by one `SYN_REPORT`. CoreGraphics exposes event posting individually, so the macOS backend avoids JS and allocation but cannot offer the same single-call batch primitive.
+`VmScratch` owns fixed stack, local, and output arrays. Successful dispatch does not parse strings, create a JavaScript callback, or allocate per instruction. Persistent state is owned by `Runtime` and survives between dispatches.
 
-A delay flushes the current batch before advancing the deadline.
+## 5. Host boundary
 
-## Source handling
+`rune-native` exposes a C ABI. A host passes a compiled binary, dispatches explicit events, reads/writes state slots, and receives output batches through a callback.
 
-The IR distinguishes `physical`, `synthetic`, and `any` trigger sources. The initial direct backends expose physical observations and prevent their own generated events from recursively triggering macros where the OS API provides source identity.
+The current ABI is deliberately host-driven:
 
-Synthetic-trigger programs are reserved in the format so future hook/virtual-device modes do not require a wire-format break.
+```text
+host observes input → rune_engine_dispatch(...)
+                    → VM output callback → host injects output
+```
 
-## Failure model
+The repository does not yet contain a host that owns Windows Raw Input/hooks, a macOS event tap, or Linux evdev/uinput. Consequently, only host-callback injection is advertised by `rune_capabilities()`.
 
-Platform errors are written into a native error slot and returned to the control plane through numeric error codes. The hot path does not log or format successful events. If a native injection fails during dispatch, that backend stops rather than silently continuing with a partially executed program.
+## Native simulator
 
-## Performance measurement
+`rune-sim` is a deterministic development host built directly on `rune-core`. It loads the same encoded binary, dispatches named input events, records native output batches, and prints persistent state after each event.
 
-Rune separates three measurements:
+It is useful for API/compiler/VM feedback, but it intentionally does not pretend to measure platform input latency.
 
-1. **Core dispatch:** trigger lookup + VM + null injector.
-2. **Runtime submission:** OS-visible event → native injection API submission.
-3. **Physical end-to-end:** switch → HID report → OS → Rune → target application.
+## Two TypeScript lanes
 
-Only the first is portable and deterministic enough for an automated repository benchmark. Platform submission latency needs a loopback device or platform-specific instrumentation. Physical end-to-end measurements need external hardware. Numbers from these scopes must never be mixed in documentation or marketing.
+Rune's intended application split is:
+
+```text
+ordinary Bun/TypeScript
+  configuration, files, networking, logging, hot reload, overlay state
+                     │
+                     │ compile/load/state control
+                     ▼
+native realtime VM
+  bounded state machines and latency-sensitive input/output logic
+```
+
+`DynamicInputLane` is a best-effort bridge for events that genuinely need JavaScript. It uses an SPSC shared ring so a native producer does not have to invoke JS directly for every event.
+
+## Delay and batching semantics
+
+Output instructions accumulate until a delay, batch capacity, or handler halt. A delay flushes the batch and advances an absolute monotonic deadline, avoiding relative-sleep drift across a sequence.
+
+The current delay waits synchronously. A continuation scheduler is a future runtime component and should use fixed-capacity queues so yielding does not add heap allocation to the hot path.
+
+## Performance measurement scopes
+
+Measurements must identify their boundary:
+
+1. **Core dispatch:** trigger lookup + VM + null/recording injector.
+2. **Host submission:** host-observed event → platform injection API submission.
+3. **Physical end-to-end:** switch → HID → OS → host → injection → target application.
+
+Only the first exists in this branch. The other two cannot be claimed until direct platform hosts and appropriate instrumentation exist.

@@ -1,159 +1,117 @@
 # API Reference
 
-Rune exposes two complementary layers:
+This page documents the API that exists in the current source tree. It deliberately excludes older design sketches such as `macro(...)`, `rune.start()`, `rt.load(...)`, `on.keyDown(...)`, or `key.tap(...)`; those symbols are not exported by the current SDK.
 
-1. the regular TypeScript builder API for simple macros;
-2. the realtime TypeScript runtime for persistent state and control flow without JavaScript on the input hot path.
-
-## Regular macro builder
-
-### `macro(name, builder)`
-
-Creates a native macro program. The builder executes only while the macro is defined.
+## Package imports
 
 ```ts
-const example = macro("example", (m) => {
-  m.on.keyDown(Key.Q).run(m.key.tap(Key.E));
-});
+import {
+  InputSource,
+  Key,
+  MouseButton,
+  clickMouse,
+  keyDown,
+  keyHeld,
+  keyUp,
+  mouseDown,
+  mouseHeld,
+  mouseUp,
+  moveMouse,
+  rt,
+  sleepUs,
+  tapKey,
+  wheelMouse,
+} from "@rune/sdk";
 ```
 
-### Trigger API
+The compiler package exports programmatic compiler/encoder APIs and a CLI:
 
 ```ts
-m.on.keyDown(Key.Q)
-m.on.keyUp(Key.Q)
-m.on.mouseDown(MouseButton.Left)
-m.on.mouseUp(MouseButton.Left)
+import { compileSource, encodeModule } from "@rune/compiler";
 ```
 
-Triggers are physical-input oriented by default. Source filtering is available for cases where synthetic events intentionally trigger other macros.
+```bash
+bun packages/compiler/src/cli.ts macro.rune.ts [output.rune.bin]
+```
 
-### Keyboard actions
+## Realtime registration
+
+### `rt.onKeyDown(key, handler, options?)`
+### `rt.onKeyUp(key, handler, options?)`
+### `rt.onMouseDown(button, handler, options?)`
+### `rt.onMouseUp(button, handler, options?)`
+
+Handlers must be top-level registration calls with an inline arrow function or function expression for AOT compilation.
 
 ```ts
-m.key.down(Key.E)
-m.key.up(Key.E)
-m.key.tap(Key.E)
+rt.onKeyDown(
+  Key.Q,
+  () => {
+    tapKey(Key.E);
+  },
+  { source: InputSource.Physical },
+);
 ```
 
-### Mouse actions
+`options.source` accepts:
+
+- `InputSource.Physical` — default;
+- `InputSource.Synthetic`;
+- `InputSource.Any`.
+
+The compiler resolves key/button arguments and source options as constants.
+
+## Realtime output intrinsics
+
+These functions are lowered to native VM opcodes when called from compiled handlers:
 
 ```ts
-m.mouse.down(MouseButton.Left)
-m.mouse.up(MouseButton.Left)
-m.mouse.click(MouseButton.Left)
-m.mouse.move(10, -5)
-m.mouse.wheel(0, 1)
+keyDown(Key.E)
+keyUp(Key.E)
+tapKey(Key.E)
+
+mouseDown(MouseButton.Left)
+mouseUp(MouseButton.Left)
+clickMouse(MouseButton.Left)
+
+moveMouse(12, -4)
+wheelMouse(0, 1)
+sleepUs(80)
 ```
 
-### Delay
+A zero-delay run of output intrinsics is collected into a fixed native output batch. `sleepUs()` flushes the current batch, advances an absolute monotonic deadline, and waits synchronously in the current VM implementation.
+
+Calling an output intrinsic directly in ordinary Bun code throws unless a fallback action sink has been installed with `withRealtimeActionSink()`.
+
+## Held-input intrinsics
 
 ```ts
-m.delay.us(80)
+keyHeld(Key.LeftShift)
+mouseHeld(MouseButton.Right)
 ```
 
-Delays use absolute monotonic deadlines internally. Very short waits may use a spin tail to reduce scheduler overshoot.
+The VM updates its input-state bitmap before invoking matching handlers. These functions read that bitmap without a platform query.
 
-### Compile-time repetition
+## Keys and buttons
 
-```ts
-m.repeat(3, m.key.tap(Key.E), m.delay.us(40))
-```
-
-This expands while the macro is built. For runtime-dependent loops, use `rt.load()`.
-
-### Runtime lifecycle
-
-```ts
-rune.configure({ spinThresholdUs: 100 })
-rune.load(program)
-rune.start()
-rune.stop()
-```
-
-Multiple programs may be loaded before the runtime is started.
-
-## Realtime TypeScript
-
-### `rt.load(fn)`
-
-Compiles a constrained TypeScript function into Rune native bytecode.
-
-```ts
-rt.load(() => {
-  let count = 0;
-
-  on.keyDown(Key.Q, () => {
-    count++;
-    if (count === 3) {
-      key.tap(Key.E);
-      count = 0;
-    }
-  });
-});
-```
-
-Top-level mutable variables inside the realtime program become persistent native state.
-
-### Input registration
-
-```ts
-on.keyDown(Key.Q, handler)
-on.keyUp(Key.Q, handler)
-on.mouseDown(MouseButton.Left, handler)
-on.mouseUp(MouseButton.Left, handler)
-```
-
-### Realtime intrinsics
-
-```ts
-key.down(Key.E)
-key.up(Key.E)
-key.tap(Key.E)
-
-mouse.down(MouseButton.Left)
-mouse.up(MouseButton.Left)
-mouse.click(MouseButton.Left)
-mouse.move(10, -5)
-mouse.wheel(0, 1)
-
-delay.us(50)
-held(Key.LeftShift)
-```
-
-### Persistent state from the control plane
-
-The Bun side may inspect or modify named persistent slots exposed by the compiled program:
-
-```ts
-rt.state("combo")
-rt.setState("combo", 0)
-```
-
-Use this for UI/configuration synchronization rather than for every input event.
-
-## Keys
-
-Rune public key identifiers follow the USB HID keyboard usage page. Common examples:
+`Key` values follow USB HID keyboard usage IDs. Examples:
 
 ```ts
 Key.A
 Key.Q
 Key.Digit1
-Key.Space
 Key.Enter
 Key.Escape
-Key.LeftShift
+Key.Space
+Key.F8
+Key.ArrowUp
 Key.LeftControl
+Key.LeftShift
 Key.LeftAlt
 Key.LeftMeta
-Key.F1
-Key.ArrowUp
 ```
 
-This keeps scripts platform-independent; native backends translate USB HID-style Rune keys to Windows, macOS, or Linux representations.
-
-## Mouse buttons
+Mouse buttons:
 
 ```ts
 MouseButton.Left
@@ -163,8 +121,91 @@ MouseButton.Back
 MouseButton.Forward
 ```
 
-## Performance rule of thumb
+## Compiler API
 
-Use the regular builder when the entire sequence is known at load time. Use realtime TypeScript when execution depends on persistent state, held inputs, branches, loops, or reusable functions.
+### `compileSource(source, options?)`
 
-Keep unrestricted work such as network requests, filesystem access, logging pipelines, and complex UI operations in ordinary Bun code outside the realtime program.
+```ts
+const result = compileSource(source, {
+  fileName: "macro.rune.ts",
+  stackLimit: 128,
+  instructionBudget: 100_000,
+});
+```
+
+Returns:
+
+- `module`: compiled states, handlers, instructions, local count, stack limit, and instruction budget;
+- `sourceFile`: the parsed TypeScript source file.
+
+Defaults are a stack limit of 128 and an instruction budget of 100,000 per handler dispatch. The native runtime caps the stack and local arrays at 256 entries.
+
+Compilation failures throw `RuneCompileError` with file, line, column, and message diagnostics.
+
+### `encodeModule(module)`
+
+Serializes a compiled module to the versioned native binary format consumed by `rune-core::Program::decode` and `rune_engine_new`.
+
+## JavaScript fallback/debug API
+
+`rt.on*` also records JavaScript fallback registrations when the source file is executed normally by Bun. This path is for tests and debugging; it is not a realtime guarantee and does not install a global input observer.
+
+### `getFallbackRealtimeRegistrations()`
+
+Returns the registrations collected in the current process.
+
+### `withRealtimeActionSink(sink, body)`
+
+Temporarily installs a `RealtimeActionSink` so handler code can be exercised in JavaScript tests.
+
+The sink receives:
+
+```ts
+interface RealtimeActionSink {
+  key(code: number, down: boolean): void;
+  mouseButton(button: number, down: boolean): void;
+  mouseMove(dx: number, dy: number): void;
+  mouseWheel(x: number, y: number): void;
+  delayUs(duration: number): void;
+  held(device: "keyboard" | "mouse", code: number): boolean;
+}
+```
+
+## Dynamic control-plane lane
+
+`DynamicInputLane` is a best-effort JavaScript lane backed by an SPSC `SharedArrayBuffer` ring. A native producer may write fixed six-word event records; Bun can drain them without scheduling a native-to-JS callback for each event.
+
+```ts
+const lane = new DynamicInputLane(1024);
+const unsubscribe = lane.on(
+  InputDevice.Keyboard,
+  Key.Q,
+  InputEdge.Down,
+  (event) => console.log(event),
+);
+
+lane.drain();
+unsubscribe();
+```
+
+This is control-plane plumbing, not the native realtime handler path.
+
+## Native state wrapper
+
+`NativeState<T>` wraps a numeric native state slot through a `NativeStateBridge`:
+
+```ts
+const enabled = new NativeState<boolean>(1, "boolean", bridge);
+enabled.set(false);
+console.log(enabled.get());
+```
+
+The compiler-generated JSON manifest supplies names, slots, and kinds. The current repository does not yet provide the complete Bun FFI host that turns that manifest into named state properties.
+
+## Overlay scene model
+
+`OverlayScene` is an in-memory retained scene/mutation model. It does not create a window or render pixels yet. See [Overlay](overlay.md).
+
+## Native ABI
+
+The C ABI creates/owns a native VM, dispatches explicit input events, exposes state slots, and sends output batches to a host callback. See [Native C ABI](native-abi.md).
