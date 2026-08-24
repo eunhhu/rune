@@ -92,6 +92,27 @@ jobs:
           dev_dependencies["typescript"] = typescript
           package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
 
+      - name: Apply source compatibility fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("crates/rune-core/src/vm.rs")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "InputDevice, InputEvent, Instruction, MouseButton",
+              "InputDevice, InputEvent, MouseButton",
+          )
+          text = text.replace(
+              "binary!(|left, right| left.wrapping_shl((right as u32) & 63))",
+              "binary!(|left: i64, right: i64| left.wrapping_shl((right as u32) & 63))",
+          )
+          text = text.replace(
+              "binary!(|left, right| left.wrapping_shr((right as u32) & 63))",
+              "binary!(|left: i64, right: i64| left.wrapping_shr((right as u32) & 63))",
+          )
+          path.write_text(text, encoding="utf-8")
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
