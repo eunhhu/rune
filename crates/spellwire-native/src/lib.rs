@@ -165,7 +165,7 @@ impl Drop for EngineAccess {
 
 #[no_mangle]
 pub extern "C" fn spellwire_abi_version() -> u32 {
-    3
+    4
 }
 
 #[no_mangle]
@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn reports_owned_host_abi_capabilities() {
-        assert_eq!(spellwire_abi_version(), 3);
+        assert_eq!(spellwire_abi_version(), 4);
         assert_eq!(
             spellwire_capabilities(),
             platform::Capability::HostCallbackInjection as u32

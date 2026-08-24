@@ -7,7 +7,7 @@ import { compileSource } from "./compiler/compiler";
 import { encodeModule } from "./compiler/encode";
 import { DynamicInputLane, NativeState, type NativeStateBridge } from "./runtime";
 
-export const NATIVE_ABI_VERSION = 3;
+export const NATIVE_ABI_VERSION = 4;
 
 export const NativeCapability = {
   HostCallbackInjection: 1 << 0,
@@ -60,6 +60,10 @@ export interface NativeRuntimeInfo {
   readonly nativeLibraryPath: string;
 }
 
+export type NativeStateSnapshot = Readonly<Record<string, number | boolean>>;
+
+const EMPTY_STATE_SNAPSHOT: NativeStateSnapshot = Object.freeze({});
+
 export interface ProgramDescriptor {
   readonly bytes: Uint8Array;
   readonly manifest: NativeManifest;
@@ -88,6 +92,10 @@ const symbols = {
   },
   spellwire_host_state_set: {
     args: [FFIType.ptr, "usize", FFIType.i64],
+    returns: FFIType.i32,
+  },
+  spellwire_host_state_snapshot: {
+    args: [FFIType.ptr, FFIType.ptr, "usize"],
     returns: FFIType.i32,
   },
   spellwire_host_set_input_ring: {
@@ -201,6 +209,9 @@ export class NativeHost implements NativeStateBridge {
   #closed = false;
   #inputLane: DynamicInputLane | null = null;
   #inputWords: Int32Array | null = null;
+  #stateSnapshot = new BigInt64Array(0);
+  #stateSnapshotCache = new BigInt64Array(0);
+  #stateSnapshotValue: NativeStateSnapshot = EMPTY_STATE_SNAPSHOT;
   #reloadTail: Promise<void> = Promise.resolve();
 
   private constructor(
@@ -348,6 +359,44 @@ export class NativeHost implements NativeStateBridge {
     return state;
   }
 
+  /** Reads every named state for one state-driven UI reconciliation pass. */
+  snapshotStates(): NativeStateSnapshot {
+    this.#assertOpen();
+    const entries = Object.entries(this.#manifest.states);
+    if (entries.length === 0) return EMPTY_STATE_SNAPSHOT;
+    const required = entries.reduce(
+      (maximum, [, entry]) => Math.max(maximum, entry.slot + 1),
+      0,
+    );
+    if (this.#stateSnapshot.length !== required) {
+      this.#stateSnapshot = new BigInt64Array(required);
+    }
+    this.#checkStatus(
+      this.#library.symbols.spellwire_host_state_snapshot(
+        this.#requiredHost(),
+        this.#stateSnapshot,
+        this.#stateSnapshot.length,
+      ),
+      "snapshot states",
+    );
+    let unchanged = this.#stateSnapshotCache.length === required;
+    for (let index = 0; unchanged && index < required; index += 1) {
+      unchanged = this.#stateSnapshotCache[index] === this.#stateSnapshot[index];
+    }
+    if (unchanged) return this.#stateSnapshotValue;
+
+    this.#stateSnapshotCache = this.#stateSnapshot.slice();
+    this.#stateSnapshotValue = Object.freeze(
+      Object.fromEntries(
+        entries.map(([name, entry]) => {
+          const value = this.#stateSnapshot[entry.slot] ?? 0n;
+          return [name, entry.kind === "boolean" ? value !== 0n : Number(value)];
+        }),
+      ),
+    );
+    return this.#stateSnapshotValue;
+  }
+
   getState(slot: number): bigint {
     this.#assertOpen();
     const output = new BigInt64Array(1);
@@ -411,6 +460,8 @@ export class NativeHost implements NativeStateBridge {
     );
     this.#manifest = descriptor.manifest;
     this.states = this.#createStates(descriptor.manifest);
+    this.#stateSnapshotCache = new BigInt64Array(0);
+    this.#stateSnapshotValue = EMPTY_STATE_SNAPSHOT;
     if (this.#running) {
       for (const [name, entry] of Object.entries(descriptor.manifest.states)) {
         const previous = preserved.get(name);

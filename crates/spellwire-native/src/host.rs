@@ -56,9 +56,31 @@ enum HostCommand {
     Stop(SyncSender<i32>),
     GetState { slot: usize, reply: SyncSender<Option<i64>> },
     SetState { slot: usize, value: i64, reply: SyncSender<bool> },
+    SnapshotState { output: StateSnapshot, reply: SyncSender<i32> },
     Reload { program: Program, preserve_state: bool, reply: SyncSender<i32> },
     Dispatch { event: InputEvent, reply: SyncSender<i32> },
     SetInputRing { ring: Option<DynamicRing>, reply: SyncSender<()> },
+}
+
+struct StateSnapshot {
+    output: NonNull<i64>,
+    capacity: usize,
+}
+
+// SAFETY: The FFI call is synchronous and retains the host-provided output buffer until the
+// worker replies. Only the worker writes it during that interval.
+unsafe impl Send for StateSnapshot {}
+
+impl StateSnapshot {
+    fn write(self, state: &[i64]) -> i32 {
+        if self.capacity < state.len() {
+            return STATUS_INVALID_ARGUMENT;
+        }
+        // SAFETY: Construction validates a non-null output pointer. The synchronous FFI contract
+        // keeps capacity writable until the worker reply is received.
+        unsafe { ptr::copy_nonoverlapping(state.as_ptr(), self.output.as_ptr(), state.len()) };
+        STATUS_OK
+    }
 }
 
 struct DynamicRing {
@@ -357,6 +379,9 @@ fn run_worker(
                 }
                 Ok(HostCommand::SetState { slot, value, reply }) => {
                     let _ = reply.send(runtime.set_state(slot, value));
+                }
+                Ok(HostCommand::SnapshotState { output, reply }) => {
+                    let _ = reply.send(output.write(runtime.state()));
                 }
                 Ok(HostCommand::Reload { program, preserve_state, reply }) => {
                     let status = reload_runtime(
@@ -692,6 +717,34 @@ pub unsafe extern "C" fn spellwire_host_state_set(
         Ok(true) => STATUS_OK,
         Ok(false) => STATUS_INVALID_ARGUMENT,
         Err(status) => status,
+    }
+}
+
+/// Copies every persistent state slot from the live worker in one command.
+///
+/// # Safety
+///
+/// `host` must remain live and `output` must point to `capacity` writable `i64` values until the
+/// synchronous call returns.
+#[no_mangle]
+pub unsafe extern "C" fn spellwire_host_state_snapshot(
+    host: *const SpellwireHost,
+    output: *mut i64,
+    capacity: usize,
+) -> i32 {
+    let Some(host) = (unsafe { host.as_ref() }) else { return STATUS_NULL };
+    let Some(output) = NonNull::new(output) else { return STATUS_INVALID_ARGUMENT };
+    let sender = match host.command_sender() {
+        Ok(sender) => sender,
+        Err(status) => return status,
+    };
+    let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+    let command = HostCommand::SnapshotState {
+        output: StateSnapshot { output, capacity },
+        reply: reply_sender,
+    };
+    match send_command(&sender, command, &reply_receiver) {
+        Ok(status) | Err(status) => status,
     }
 }
 
