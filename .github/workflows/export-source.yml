@@ -25,3 +25,5 @@ jobs:
           name: pr4-source-snapshot
           path: /tmp/source-snapshot.tar.gz
           retention-days: 1
+
+# synchronize PR snapshot export
