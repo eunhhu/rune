@@ -144,6 +144,11 @@ export interface RealtimeActionSink {
   held(device: "keyboard" | "mouse", code: number): boolean;
 }
 
+const MICROSECONDS_PER_MILLISECOND = 1_000;
+const MICROSECONDS_PER_SECOND = 1_000_000;
+const MICROSECONDS_PER_MINUTE = 60_000_000;
+const MICROSECONDS_PER_HOUR = 3_600_000_000;
+
 let currentSink: RealtimeActionSink | undefined;
 
 export function withRealtimeActionSink<T>(sink: RealtimeActionSink, body: () => T): T {
@@ -203,9 +208,45 @@ export function wheelMouse(x: number, y: number): void {
   sink().mouseWheel(x, y);
 }
 
-export function sleepUs(duration: number): void {
-  sink().delayUs(duration);
+function sleepScaled(duration: number, scale: number, label: string): void {
+  if (!Number.isSafeInteger(duration) || duration < 0) {
+    throw new RangeError(`${label} duration must be a non-negative safe integer`);
+  }
+  const microseconds = duration * scale;
+  if (!Number.isSafeInteger(microseconds)) {
+    throw new RangeError(`${label} duration exceeds the safe integer microsecond range`);
+  }
+  sink().delayUs(microseconds);
 }
+
+export function sleepUs(duration: number): void {
+  sleepScaled(duration, 1, "sleepUs");
+}
+
+export function sleepMs(duration: number): void {
+  sleepScaled(duration, MICROSECONDS_PER_MILLISECOND, "sleepMs");
+}
+
+export function sleepSeconds(duration: number): void {
+  sleepScaled(duration, MICROSECONDS_PER_SECOND, "sleepSeconds");
+}
+
+export function sleepMinutes(duration: number): void {
+  sleepScaled(duration, MICROSECONDS_PER_MINUTE, "sleepMinutes");
+}
+
+export function sleepHours(duration: number): void {
+  sleepScaled(duration, MICROSECONDS_PER_HOUR, "sleepHours");
+}
+
+/** Unit-based delay API. The AOT compiler lowers every member to one native delay opcode. */
+export const sleep = Object.freeze({
+  us: sleepUs,
+  ms: sleepMs,
+  seconds: sleepSeconds,
+  minutes: sleepMinutes,
+  hours: sleepHours,
+});
 
 export function keyHeld(key: Key): boolean {
   return sink().held("keyboard", key);

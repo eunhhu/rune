@@ -1,4 +1,4 @@
-export const WIRE_VERSION = 3;
+export const WIRE_VERSION = 4;
 export const WIRE_HEADER_SIZE = 24;
 export const WIRE_HANDLER_SIZE = 16;
 export const WIRE_INSTRUCTION_SIZE = 16;
@@ -44,6 +44,10 @@ export enum Opcode {
   MouseMove = 36,
   MouseWheel = 37,
   DelayUs = 38,
+  StoreStateImm = 39,
+  AddStateImm = 40,
+  XorStateImm = 41,
+  ToggleState = 42,
 }
 
 export enum InputDevice {

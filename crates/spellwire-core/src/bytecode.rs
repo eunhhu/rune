@@ -1,13 +1,16 @@
 use core::fmt;
 
 pub const WIRE_MAGIC: [u8; 4] = *b"SPWR";
-pub const WIRE_VERSION: u16 = 3;
+pub const WIRE_VERSION: u16 = 4;
+pub const MIN_WIRE_VERSION: u16 = 3;
 pub const WIRE_HEADER_SIZE: usize = 24;
 pub const WIRE_HANDLER_SIZE: usize = 16;
 pub const WIRE_INSTRUCTION_SIZE: usize = 16;
 
 /// Output/query opcodes read their operands from the VM stack when this bit is set.
 pub const FLAG_STACK_OPERANDS: u8 = 1 << 7;
+/// `DelayUs` reads a signed 64-bit immediate, or scales its stack operand by that immediate.
+pub const FLAG_WIDE_DELAY: u8 = 1 << 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -51,6 +54,10 @@ pub enum Opcode {
     MouseMove = 36,
     MouseWheel = 37,
     DelayUs = 38,
+    StoreStateImm = 39,
+    AddStateImm = 40,
+    XorStateImm = 41,
+    ToggleState = 42,
 }
 
 impl TryFrom<u8> for Opcode {
@@ -97,6 +104,10 @@ impl TryFrom<u8> for Opcode {
             36 => Ok(Self::MouseMove),
             37 => Ok(Self::MouseWheel),
             38 => Ok(Self::DelayUs),
+            39 => Ok(Self::StoreStateImm),
+            40 => Ok(Self::AddStateImm),
+            41 => Ok(Self::XorStateImm),
+            42 => Ok(Self::ToggleState),
             _ => Err(()),
         }
     }

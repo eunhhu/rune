@@ -749,6 +749,20 @@ fn execute_until_yield<I: Injector>(
             Opcode::PushConst => push!(instruction.immediate),
             Opcode::LoadState => push!(state[usize::from(instruction.a)]),
             Opcode::StoreState => state[usize::from(instruction.a)] = pop!(),
+            Opcode::StoreStateImm => {
+                state[usize::from(instruction.a)] = instruction.immediate;
+            }
+            Opcode::AddStateImm => {
+                let target = &mut state[usize::from(instruction.a)];
+                *target = target.wrapping_add(instruction.immediate);
+            }
+            Opcode::XorStateImm => {
+                state[usize::from(instruction.a)] ^= instruction.immediate;
+            }
+            Opcode::ToggleState => {
+                let target = &mut state[usize::from(instruction.a)];
+                *target = i64::from(*target == 0);
+            }
             Opcode::LoadLocal => push!(scratch.locals[usize::from(instruction.a)]),
             Opcode::StoreLocal => scratch.locals[usize::from(instruction.a)] = pop!(),
             Opcode::Pop => {
@@ -871,18 +885,38 @@ fn execute_until_yield<I: Injector>(
                 cursor.output_events = cursor.output_events.saturating_add(1);
             }
             Opcode::DelayUs => {
-                let raw_delay = if instruction.flags & crate::FLAG_STACK_OPERANDS != 0 {
+                let stack_operand = instruction.flags & crate::FLAG_STACK_OPERANDS != 0;
+                let wide = instruction.flags & crate::FLAG_WIDE_DELAY != 0;
+                let raw_delay = if stack_operand {
                     pop!()
+                } else if wide {
+                    instruction.immediate
                 } else {
                     i64::from(instruction.b)
                 };
-                let delay = u32::try_from(raw_delay)
-                    .map_err(|_| ExecutionFailure::Vm(VmError::InvalidDelay(raw_delay)))?;
-                scratch.flush(injector).map_err(ExecutionFailure::Inject)?;
-                cursor.deadline = cursor
+                let scaled_delay = if stack_operand && wide {
+                    raw_delay
+                        .checked_mul(instruction.immediate)
+                        .ok_or(ExecutionFailure::Vm(VmError::InvalidDelay(raw_delay)))?
+                } else {
+                    raw_delay
+                };
+                let delay = if wide {
+                    u64::try_from(scaled_delay)
+                        .map_err(|_| ExecutionFailure::Vm(VmError::InvalidDelay(scaled_delay)))?
+                } else {
+                    u64::from(
+                        u32::try_from(scaled_delay).map_err(|_| {
+                            ExecutionFailure::Vm(VmError::InvalidDelay(scaled_delay))
+                        })?,
+                    )
+                };
+                let deadline = cursor
                     .deadline
-                    .checked_add(Duration::from_micros(u64::from(delay)))
-                    .unwrap_or_else(Instant::now);
+                    .checked_add(Duration::from_micros(delay))
+                    .ok_or(ExecutionFailure::Vm(VmError::InvalidDelay(scaled_delay)))?;
+                scratch.flush(injector).map_err(ExecutionFailure::Inject)?;
+                cursor.deadline = deadline;
                 return Ok(ExecutionStep::Yield(cursor.deadline));
             }
         }
@@ -954,7 +988,12 @@ pub fn validate_program(program: &Program) -> Result<(), ProgramError> {
                     target: instruction.b,
                 });
             }
-            Opcode::LoadState | Opcode::StoreState
+            Opcode::LoadState
+            | Opcode::StoreState
+            | Opcode::StoreStateImm
+            | Opcode::AddStateImm
+            | Opcode::XorStateImm
+            | Opcode::ToggleState
                 if usize::from(instruction.a) >= program.initial_state.len() =>
             {
                 return Err(ProgramError::InvalidStateSlot {
@@ -980,7 +1019,7 @@ mod tests {
 
     use crate::{
         key, Handler, InputSource, Instruction, Opcode, Program, SourceFilter, Trigger,
-        FLAG_STACK_OPERANDS,
+        FLAG_STACK_OPERANDS, FLAG_WIDE_DELAY,
     };
 
     use super::*;
@@ -1068,11 +1107,9 @@ mod tests {
     }
 
     #[test]
-    fn invalid_dynamic_delay_does_not_flush_pending_output() {
-        let mut delay = Instruction::new(Opcode::DelayUs);
-        delay.flags = FLAG_STACK_OPERANDS;
+    fn direct_state_opcodes_update_slots_without_vm_stack_traffic() {
         let program = Program {
-            initial_state: Box::new([]),
+            initial_state: vec![0, 1, 0].into_boxed_slice(),
             handlers: vec![Handler {
                 trigger: Trigger {
                     device: InputDevice::Keyboard,
@@ -1087,30 +1124,82 @@ mod tests {
             }]
             .into_boxed_slice(),
             code: vec![
-                Instruction::new(Opcode::KeyDown).with_a(key::E),
-                Instruction::new(Opcode::PushConst).with_immediate(-1),
-                delay,
-                Instruction::new(Opcode::KeyUp).with_a(key::E),
+                Instruction::new(Opcode::AddStateImm).with_a(0).with_immediate(3),
+                Instruction::new(Opcode::ToggleState).with_a(1),
+                Instruction::new(Opcode::XorStateImm).with_a(2).with_immediate(5),
+                Instruction::new(Opcode::StoreStateImm).with_a(0).with_immediate(9),
                 Instruction::new(Opcode::Halt),
             ]
             .into_boxed_slice(),
             local_count: 0,
-            stack_limit: 8,
+            stack_limit: 1,
             instruction_budget: 100,
         };
         let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
-        let event = InputEvent {
-            device: InputDevice::Keyboard,
-            code: key::Q,
-            edge: Edge::Down,
-            source: InputSource::Physical,
-        };
         let mut injector = RecordingInjector::default();
         let mut scratch = VmScratch::new();
 
-        let error = runtime.dispatch(event, &mut injector, &mut scratch).unwrap_err();
-        assert!(matches!(error, DispatchError::Vm { source: VmError::InvalidDelay(-1), .. }));
-        assert!(injector.0.is_empty());
+        dispatch_key(
+            &mut runtime,
+            &mut injector,
+            &mut scratch,
+            key::Q,
+            Edge::Down,
+            InputSource::Physical,
+        );
+        assert_eq!(runtime.state(), &[9, 0, 5]);
+    }
+
+    #[test]
+    fn invalid_dynamic_delay_does_not_flush_pending_output() {
+        for invalid_delay in [-1, i64::from(u32::MAX) + 1] {
+            let mut delay = Instruction::new(Opcode::DelayUs);
+            delay.flags = FLAG_STACK_OPERANDS;
+            let program = Program {
+                initial_state: Box::new([]),
+                handlers: vec![Handler {
+                    trigger: Trigger {
+                        device: InputDevice::Keyboard,
+                        code: key::Q,
+                        edge: Edge::Down,
+                        source: SourceFilter::Physical,
+                        flags: 0,
+                        modifiers: 0,
+                        gate: crate::NO_STATE_GATE,
+                    },
+                    entry: 0,
+                }]
+                .into_boxed_slice(),
+                code: vec![
+                    Instruction::new(Opcode::KeyDown).with_a(key::E),
+                    Instruction::new(Opcode::PushConst).with_immediate(invalid_delay),
+                    delay,
+                    Instruction::new(Opcode::KeyUp).with_a(key::E),
+                    Instruction::new(Opcode::Halt),
+                ]
+                .into_boxed_slice(),
+                local_count: 0,
+                stack_limit: 8,
+                instruction_budget: 100,
+            };
+            let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+            let event = InputEvent {
+                device: InputDevice::Keyboard,
+                code: key::Q,
+                edge: Edge::Down,
+                source: InputSource::Physical,
+            };
+            let mut injector = RecordingInjector::default();
+            let mut scratch = VmScratch::new();
+
+            let error = runtime.dispatch(event, &mut injector, &mut scratch).unwrap_err();
+            assert!(matches!(
+                error,
+                DispatchError::Vm { source: VmError::InvalidDelay(value), .. }
+                    if value == invalid_delay
+            ));
+            assert!(injector.0.is_empty());
+        }
     }
 
     #[test]
@@ -1172,6 +1261,51 @@ mod tests {
         assert_eq!(complete.pending_handlers, 0);
         assert_eq!(complete.instructions, 4);
         assert_eq!(injector.0[1], OutputEvent::Key { code: key::E, down: false });
+    }
+
+    #[test]
+    fn wide_scaled_delay_supports_hour_units_in_one_opcode() {
+        let mut delay = Instruction::new(Opcode::DelayUs).with_immediate(3_600_000_000);
+        delay.flags = FLAG_STACK_OPERANDS | FLAG_WIDE_DELAY;
+        let program = Program {
+            initial_state: vec![2].into_boxed_slice(),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::Q,
+                    edge: Edge::Down,
+                    source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: crate::NO_STATE_GATE,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![
+                Instruction::new(Opcode::LoadState).with_a(0),
+                delay,
+                Instruction::new(Opcode::Halt),
+            ]
+            .into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 1,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let mut scheduler = ContinuationScheduler::default();
+        let mut injector = RecordingInjector::default();
+        let now = Instant::now();
+        let event = InputEvent {
+            device: InputDevice::Keyboard,
+            code: key::Q,
+            edge: Edge::Down,
+            source: InputSource::Physical,
+        };
+
+        runtime.enqueue(event, &mut scheduler, now).unwrap();
+        let report = runtime.poll_ready(&mut scheduler, now, &mut injector).unwrap();
+        assert_eq!(report.next_deadline, Some(now + Duration::from_secs(7_200)));
     }
 
     #[test]

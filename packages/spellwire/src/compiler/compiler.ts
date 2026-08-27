@@ -50,6 +50,22 @@ type SourceFileWithParseDiagnostics = ts.SourceFile & {
 
 const MAX_TRIGGER_KEY_CODE = 0xff;
 const MAX_TRIGGER_MOUSE_BUTTON = 7;
+const FLAG_WIDE_DELAY = 1 << 6;
+const FLAG_STACK_OPERANDS = 1 << 7;
+const MAX_I64 = (1n << 63n) - 1n;
+
+const DELAY_SCALE = {
+  "sleep.us": 1n,
+  "sleep.ms": 1_000n,
+  "sleep.seconds": 1_000_000n,
+  "sleep.minutes": 60_000_000n,
+  "sleep.hours": 3_600_000_000n,
+  sleepUs: 1n,
+  sleepMs: 1_000n,
+  sleepSeconds: 1_000_000n,
+  sleepMinutes: 60_000_000n,
+  sleepHours: 3_600_000_000n,
+} as const;
 
 interface LoopContext {
   breakPatches: number[];
@@ -516,7 +532,9 @@ class Compiler {
       return;
     }
     if (ts.isExpressionStatement(statement)) {
-      if (this.compileExpression(statement.expression, scope)) this.emit(Opcode.Pop);
+      if (!this.compileDiscardedExpression(statement.expression, scope)) {
+        if (this.compileExpression(statement.expression, scope)) this.emit(Opcode.Pop);
+      }
       return;
     }
     if (ts.isIfStatement(statement)) {
@@ -570,6 +588,119 @@ class Compiler {
     this.fail(statement, `Unsupported realtime statement: ${ts.SyntaxKind[statement.kind]}`);
   }
 
+  compileDiscardedExpression(expression: ts.Expression, scope: Scope): boolean {
+    const target = unwrapRealtimeExpression(expression);
+    if (
+      ts.isPrefixUnaryExpression(target) &&
+      (target.operator === ts.SyntaxKind.PlusPlusToken ||
+        target.operator === ts.SyntaxKind.MinusMinusToken)
+    ) {
+      this.compileDiscardedUpdate(
+        target.operand,
+        target.operator === ts.SyntaxKind.PlusPlusToken ? 1n : -1n,
+        scope,
+      );
+      return true;
+    }
+    if (ts.isPostfixUnaryExpression(target)) {
+      this.compileDiscardedUpdate(
+        target.operand,
+        target.operator === ts.SyntaxKind.PlusPlusToken ? 1n : -1n,
+        scope,
+      );
+      return true;
+    }
+    if (ts.isBinaryExpression(target) && isAssignmentOperator(target.operatorToken.kind)) {
+      this.compileDiscardedAssignment(
+        target.left,
+        target.operatorToken.kind,
+        target.right,
+        scope,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  compileDiscardedAssignment(
+    target: ts.Expression,
+    operator: ts.SyntaxKind,
+    value: ts.Expression,
+    scope: Scope,
+  ): void {
+    const binding = this.resolveWritable(target, scope);
+    if (binding.kind === "state") {
+      if (operator === ts.SyntaxKind.EqualsToken && this.isStateToggle(binding, value, scope)) {
+        this.emit(Opcode.ToggleState, { a: binding.slot });
+        return;
+      }
+      const constant = this.constantValue(value, new Set());
+      if (constant !== undefined) {
+        const immediate = BigInt.asIntN(64, constant);
+        if (operator === ts.SyntaxKind.EqualsToken) {
+          this.emit(Opcode.StoreStateImm, { a: binding.slot, immediate });
+          return;
+        }
+        if (
+          operator === ts.SyntaxKind.PlusEqualsToken ||
+          operator === ts.SyntaxKind.MinusEqualsToken
+        ) {
+          this.emit(Opcode.AddStateImm, {
+            a: binding.slot,
+            immediate: operator === ts.SyntaxKind.PlusEqualsToken
+              ? immediate
+              : BigInt.asIntN(64, -immediate),
+          });
+          return;
+        }
+        if (operator === ts.SyntaxKind.CaretEqualsToken) {
+          this.emit(Opcode.XorStateImm, { a: binding.slot, immediate });
+          return;
+        }
+      }
+    }
+
+    if (operator !== ts.SyntaxKind.EqualsToken) {
+      this.emit(binding.kind === "state" ? Opcode.LoadState : Opcode.LoadLocal, {
+        a: binding.slot,
+      });
+    }
+    this.requireValue(value, scope);
+    if (operator !== ts.SyntaxKind.EqualsToken) {
+      const opcode = compoundOpcode(operator);
+      if (opcode === undefined) this.fail(target, "Unsupported realtime compound assignment");
+      this.emit(opcode);
+    }
+    this.emit(binding.kind === "state" ? Opcode.StoreState : Opcode.StoreLocal, {
+      a: binding.slot,
+    });
+  }
+
+  compileDiscardedUpdate(target: ts.Expression, delta: bigint, scope: Scope): void {
+    const binding = this.resolveWritable(target, scope);
+    if (binding.kind === "state") {
+      this.emit(Opcode.AddStateImm, { a: binding.slot, immediate: delta });
+      return;
+    }
+    this.emit(Opcode.LoadLocal, { a: binding.slot });
+    this.emit(Opcode.PushConst, { immediate: delta < 0n ? -delta : delta });
+    this.emit(delta < 0n ? Opcode.Sub : Opcode.Add);
+    this.emit(Opcode.StoreLocal, { a: binding.slot });
+  }
+
+  isStateToggle(binding: Binding, expression: ts.Expression, scope: Scope): boolean {
+    const value = unwrapRealtimeExpression(expression);
+    if (!ts.isPrefixUnaryExpression(value) || value.operator !== ts.SyntaxKind.ExclamationToken) {
+      return false;
+    }
+    const operand = unwrapRealtimeExpression(value.operand);
+    if (!ts.isIdentifier(operand)) return false;
+    const source = scope.get(operand.text) ?? this.stateBindings.get(operand.text);
+    return source?.kind === "state" &&
+      source.slot === binding.slot &&
+      this.states[binding.slot]?.kind === "boolean";
+  }
+
   compileFor(statement: ts.ForStatement, parent: Scope): void {
     const scope = new Scope(parent);
     if (statement.initializer) {
@@ -586,8 +717,8 @@ class Compiler {
           }
           this.emit(Opcode.StoreLocal, { a: binding.slot });
         }
-      } else if (this.compileExpression(statement.initializer, scope)) {
-        this.emit(Opcode.Pop);
+      } else if (!this.compileDiscardedExpression(statement.initializer, scope)) {
+        if (this.compileExpression(statement.initializer, scope)) this.emit(Opcode.Pop);
       }
     }
 
@@ -605,7 +736,11 @@ class Compiler {
 
     const incrementPc = this.code.length;
     this.patchAll(loop.continuePatches, incrementPc);
-    if (statement.incrementor && this.compileExpression(statement.incrementor, scope)) {
+    if (
+      statement.incrementor &&
+      !this.compileDiscardedExpression(statement.incrementor, scope) &&
+      this.compileExpression(statement.incrementor, scope)
+    ) {
       this.emit(Opcode.Pop);
     }
     this.emit(Opcode.Jump, { b: conditionPc });
@@ -749,19 +884,7 @@ class Compiler {
 
   compileBinary(expression: ts.BinaryExpression, scope: Scope): boolean {
     const operator = expression.operatorToken.kind;
-    if (
-      operator === ts.SyntaxKind.EqualsToken ||
-      operator === ts.SyntaxKind.PlusEqualsToken ||
-      operator === ts.SyntaxKind.MinusEqualsToken ||
-      operator === ts.SyntaxKind.AsteriskEqualsToken ||
-      operator === ts.SyntaxKind.SlashEqualsToken ||
-      operator === ts.SyntaxKind.PercentEqualsToken ||
-      operator === ts.SyntaxKind.AmpersandEqualsToken ||
-      operator === ts.SyntaxKind.BarEqualsToken ||
-      operator === ts.SyntaxKind.CaretEqualsToken ||
-      operator === ts.SyntaxKind.LessThanLessThanEqualsToken ||
-      operator === ts.SyntaxKind.GreaterThanGreaterThanEqualsToken
-    ) {
+    if (isAssignmentOperator(operator)) {
       return this.compileAssignment(expression.left, operator, expression.right, scope);
     }
     if (operator === ts.SyntaxKind.AmpersandAmpersandToken) {
@@ -840,6 +963,11 @@ class Compiler {
   compileCall(call: ts.CallExpression, scope: Scope): boolean {
     const name = callName(call.expression);
     if (!name) this.fail(call.expression, "Realtime calls must target a named function");
+    const delayScale = DELAY_SCALE[name as keyof typeof DELAY_SCALE];
+    if (delayScale !== undefined) {
+      this.emitDelay(call, scope, name, delayScale);
+      return false;
+    }
 
     switch (name) {
       case "keyDown":
@@ -892,21 +1020,6 @@ class Compiler {
       case "wheelMouse":
         this.emitPairOutput(Opcode.MouseWheel, call.arguments[0], call.arguments[1], call, scope);
         return false;
-      case "sleepUs": {
-        const duration = call.arguments[0];
-        if (!duration) this.fail(call, "sleepUs requires a duration");
-        const constant = this.constantNumber(duration);
-        if (constant !== undefined) {
-          if (constant < 0 || constant > 0xffff_ffff) {
-            this.fail(duration, "sleepUs duration must fit u32");
-          }
-          this.emit(Opcode.DelayUs, { b: constant });
-        } else {
-          this.requireValue(duration, scope);
-          this.emit(Opcode.DelayUs, { flags: 0x80 });
-        }
-        return false;
-      }
       case "keyHeld":
         this.emitHeld(InputDevice.Keyboard, call.arguments[0], call, scope);
         return true;
@@ -921,6 +1034,27 @@ class Compiler {
     if (!declaration) this.fail(call.expression, `Unsupported realtime function ${name}`);
     this.inlineFunction(declaration, call.arguments, scope);
     return false;
+  }
+
+  emitDelay(call: ts.CallExpression, scope: Scope, name: string, scale: bigint): void {
+    const duration = call.arguments[0];
+    if (!duration || call.arguments.length !== 1) {
+      this.fail(call, `${name} requires exactly one duration`);
+    }
+    const constant = this.constantValue(duration, new Set());
+    if (constant !== undefined) {
+      const microseconds = constant * scale;
+      if (microseconds < 0n || microseconds > MAX_I64) {
+        this.fail(duration, `${name} duration exceeds the signed 64-bit microsecond range`);
+      }
+      this.emit(Opcode.DelayUs, { flags: FLAG_WIDE_DELAY, immediate: microseconds });
+      return;
+    }
+    this.requireValue(duration, scope);
+    this.emit(Opcode.DelayUs, {
+      flags: FLAG_STACK_OPERANDS | FLAG_WIDE_DELAY,
+      immediate: scale,
+    });
   }
 
   emitSingleValueOutput(
@@ -1323,7 +1457,41 @@ function compoundOpcode(kind: ts.SyntaxKind): Opcode | undefined {
 
 function callName(expression: ts.LeftHandSideExpression): string | undefined {
   if (ts.isIdentifier(expression)) return expression.text;
+  if (
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "sleep"
+  ) {
+    return `sleep.${expression.name.text}`;
+  }
   return undefined;
+}
+
+function unwrapRealtimeExpression(expression: ts.Expression): ts.Expression {
+  let result = expression;
+  while (
+    ts.isParenthesizedExpression(result) ||
+    ts.isAsExpression(result) ||
+    ts.isTypeAssertionExpression(result) ||
+    ts.isNonNullExpression(result)
+  ) {
+    result = result.expression;
+  }
+  return result;
+}
+
+function isAssignmentOperator(operator: ts.SyntaxKind): boolean {
+  return operator === ts.SyntaxKind.EqualsToken ||
+    operator === ts.SyntaxKind.PlusEqualsToken ||
+    operator === ts.SyntaxKind.MinusEqualsToken ||
+    operator === ts.SyntaxKind.AsteriskEqualsToken ||
+    operator === ts.SyntaxKind.SlashEqualsToken ||
+    operator === ts.SyntaxKind.PercentEqualsToken ||
+    operator === ts.SyntaxKind.AmpersandEqualsToken ||
+    operator === ts.SyntaxKind.BarEqualsToken ||
+    operator === ts.SyntaxKind.CaretEqualsToken ||
+    operator === ts.SyntaxKind.LessThanLessThanEqualsToken ||
+    operator === ts.SyntaxKind.GreaterThanGreaterThanEqualsToken;
 }
 
 function enumMember(owner: string, member: string): number | undefined {

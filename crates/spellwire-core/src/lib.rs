@@ -5,8 +5,8 @@ mod vm;
 mod wire;
 
 pub use bytecode::{
-    Instruction, Opcode, FLAG_STACK_OPERANDS, WIRE_HANDLER_SIZE, WIRE_HEADER_SIZE,
-    WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION,
+    Instruction, Opcode, FLAG_STACK_OPERANDS, FLAG_WIDE_DELAY, MIN_WIRE_VERSION, WIRE_HANDLER_SIZE,
+    WIRE_HEADER_SIZE, WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION,
 };
 pub use model::{
     key, modifier_for_key, Edge, InputDevice, InputEvent, InputSource, MouseButton, OutputEvent,

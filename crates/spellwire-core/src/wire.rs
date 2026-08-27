@@ -2,10 +2,13 @@ use core::fmt;
 
 use crate::{
     bytecode::{
-        WIRE_HANDLER_SIZE, WIRE_HEADER_SIZE, WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION,
+        FLAG_WIDE_DELAY, MIN_WIRE_VERSION, WIRE_HANDLER_SIZE, WIRE_HEADER_SIZE,
+        WIRE_INSTRUCTION_SIZE, WIRE_MAGIC, WIRE_VERSION,
     },
     Edge, Handler, InputDevice, Instruction, Opcode, Program, SourceFilter, Trigger,
 };
+
+const WIRE_VERSION_WITH_WIDE_DELAY: u16 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
@@ -55,7 +58,7 @@ impl Program {
             return Err(DecodeError::InvalidMagic);
         }
         let version = reader.u16()?;
-        if version != WIRE_VERSION {
+        if !(MIN_WIRE_VERSION..=WIRE_VERSION).contains(&version) {
             return Err(DecodeError::UnsupportedVersion(version));
         }
         let _flags = reader.u16()?;
@@ -119,18 +122,19 @@ impl Program {
         let mut code = Vec::with_capacity(instruction_count);
         for _ in 0..instruction_count {
             let raw_opcode = reader.u8()?;
-            let flags = reader.u8()?;
+            if version < WIRE_VERSION_WITH_WIDE_DELAY && raw_opcode > Opcode::DelayUs as u8 {
+                return Err(DecodeError::InvalidOpcode(raw_opcode));
+            }
+            let opcode = Opcode::try_from(raw_opcode)
+                .map_err(|()| DecodeError::InvalidOpcode(raw_opcode))?;
+            let mut flags = reader.u8()?;
+            if version < WIRE_VERSION_WITH_WIDE_DELAY && opcode == Opcode::DelayUs {
+                flags &= !FLAG_WIDE_DELAY;
+            }
             let a = reader.u16()?;
             let b = reader.u32()?;
             let immediate = reader.i64()?;
-            code.push(Instruction {
-                opcode: Opcode::try_from(raw_opcode)
-                    .map_err(|()| DecodeError::InvalidOpcode(raw_opcode))?,
-                flags,
-                a,
-                b,
-                immediate,
-            });
+            code.push(Instruction { opcode, flags, a, b, immediate });
         }
 
         if reader.remaining() != 0 {
@@ -228,5 +232,20 @@ mod tests {
         let program = Program::decode(&bytes).unwrap();
         assert_eq!(program.initial_state.as_ref(), &[7]);
         assert_eq!(program.code[0].opcode, Opcode::Halt);
+
+        bytes[4..6].copy_from_slice(&MIN_WIRE_VERSION.to_le_bytes());
+        assert!(Program::decode(&bytes).is_ok());
+
+        let opcode_offset = WIRE_HEADER_SIZE + 8 + WIRE_HANDLER_SIZE;
+        bytes[opcode_offset] = Opcode::DelayUs as u8;
+        bytes[opcode_offset + 1] = FLAG_WIDE_DELAY;
+        let legacy = Program::decode(&bytes).unwrap();
+        assert_eq!(legacy.code[0].flags & FLAG_WIDE_DELAY, 0);
+
+        bytes[opcode_offset] = Opcode::StoreStateImm as u8;
+        assert!(matches!(
+            Program::decode(&bytes),
+            Err(DecodeError::InvalidOpcode(raw)) if raw == Opcode::StoreStateImm as u8
+        ));
     }
 }

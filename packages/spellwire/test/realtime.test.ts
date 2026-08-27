@@ -3,6 +3,12 @@ import {
   Key,
   getFallbackRealtimeRegistrations,
   rt,
+  sleep,
+  sleepHours,
+  sleepMinutes,
+  sleepMs,
+  sleepSeconds,
+  sleepUs,
   tapKey,
   withRealtimeActionSink,
 } from "../src/index";
@@ -28,6 +34,48 @@ test("intrinsics have a debuggable JavaScript fallback", () => {
     [Key.E, true],
     [Key.E, false],
   ]);
+});
+
+test("delay helpers lower to microseconds in the JavaScript fallback", () => {
+  const delays: number[] = [];
+  withRealtimeActionSink(
+    {
+      key() {},
+      mouseButton() {},
+      mouseMove() {},
+      mouseWheel() {},
+      delayUs(duration) {
+        delays.push(duration);
+      },
+      held() {
+        return false;
+      },
+    },
+    () => {
+      sleepUs(7);
+      sleepMs(2);
+      sleepSeconds(3);
+      sleepMinutes(1);
+      sleepHours(1);
+      sleep.ms(4);
+      sleep.seconds(5);
+    },
+  );
+  expect(delays).toEqual([
+    7,
+    2_000,
+    3_000_000,
+    60_000_000,
+    3_600_000_000,
+    4_000,
+    5_000_000,
+  ]);
+  expect(() => withRealtimeActionSink(
+    {
+      key() {}, mouseButton() {}, mouseMove() {}, mouseWheel() {}, delayUs() {}, held: () => false,
+    },
+    () => sleepMs(-1),
+  )).toThrow(RangeError);
 });
 
 test("fallback hotkeys honor state gates", () => {

@@ -45,6 +45,54 @@ describe("Spellwire TypeScript AOT compiler", () => {
     expect(result.module.code.at(-1)?.opcode).toBe(Opcode.Halt);
   });
 
+  test("fuses discarded state assignments and updates into direct opcodes", () => {
+    const result = compileSource(`
+      import { Key, rt } from "../src/index";
+      let count = 0;
+      let enabled = true;
+      let mask = 0;
+      rt.onKeyDown(Key.Q, () => {
+        count++;
+        count += 2;
+        count -= 1;
+        enabled = !enabled;
+        mask ^= 4;
+        count = 0;
+      });
+    `);
+
+    expect(result.module.code.map(({ opcode, a, immediate }) => ({ opcode, a, immediate }))).toEqual([
+      { opcode: Opcode.AddStateImm, a: 0, immediate: 1n },
+      { opcode: Opcode.AddStateImm, a: 0, immediate: 2n },
+      { opcode: Opcode.AddStateImm, a: 0, immediate: -1n },
+      { opcode: Opcode.ToggleState, a: 1, immediate: 0n },
+      { opcode: Opcode.XorStateImm, a: 2, immediate: 4n },
+      { opcode: Opcode.StoreStateImm, a: 0, immediate: 0n },
+      { opcode: Opcode.Halt, a: 0, immediate: 0n },
+    ]);
+  });
+
+  test("lowers every delay unit to one wide native delay opcode", () => {
+    const result = compileSource(`
+      import { Key, rt, sleep, sleepHours, sleepMs } from "../src/index";
+      let seconds = 2;
+      rt.onKeyDown(Key.Q, () => {
+        sleepMs(250);
+        sleep.seconds(3);
+        sleepHours(2);
+        sleep.seconds(seconds);
+      });
+    `);
+    const delays = result.module.code.filter(({ opcode }) => opcode === Opcode.DelayUs);
+    expect(delays).toHaveLength(4);
+    expect(delays.slice(0, 3).map(({ flags, immediate }) => ({ flags, immediate }))).toEqual([
+      { flags: 0x40, immediate: 250_000n },
+      { flags: 0x40, immediate: 3_000_000n },
+      { flags: 0x40, immediate: 7_200_000_000n },
+    ]);
+    expect(delays[3]).toMatchObject({ flags: 0xc0, immediate: 1_000_000n });
+  });
+
   test("ignores unrelated dynamic TypeScript until realtime code captures it", () => {
     const source = `
       import { Key, rt } from "../src/index";

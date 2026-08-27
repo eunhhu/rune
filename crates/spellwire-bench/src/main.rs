@@ -42,10 +42,7 @@ fn main() {
         }]
         .into_boxed_slice(),
         code: vec![
-            Instruction::new(Opcode::LoadState).with_a(0),
-            Instruction::new(Opcode::PushConst).with_immediate(1),
-            Instruction::new(Opcode::Add),
-            Instruction::new(Opcode::StoreState).with_a(0),
+            Instruction::new(Opcode::AddStateImm).with_a(0).with_immediate(1),
             Instruction::new(Opcode::KeyDown).with_a(key::E),
             Instruction::new(Opcode::KeyUp).with_a(key::E),
             Instruction::new(Opcode::Halt),
