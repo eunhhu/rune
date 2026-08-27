@@ -34,6 +34,14 @@
     "./native": {
       "types": "./src/native.ts",
       "import": "./src/native.ts"
+    },
+    "./rpc": {
+      "types": "./src/rpc.ts",
+      "import": "./src/rpc.ts"
+    },
+    "./rpc/server": {
+      "types": "./src/rpc-server.ts",
+      "import": "./src/rpc-server.ts"
     }
   },
   "types": "./src/index.ts",

@@ -119,3 +119,7 @@ export type {
 } from "./native";
 
 export * from "./compiler";
+export { SpellwireRpcClient } from "./rpc";
+export type { RpcEventHandler, SpellwireRpcClientOptions } from "./rpc";
+export { SpellwireRpcServer } from "./rpc-server";
+export type { RpcMethod, SpellwireRpcServerOptions } from "./rpc-server";
