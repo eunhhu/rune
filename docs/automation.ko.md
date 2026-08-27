@@ -109,12 +109,10 @@ macOS의 물리 Caps Lock은 일반 key pair가 아니라 toggle형 `flagsChange
 
 ## 하나의 상태로 input과 overlay 함께 구동
 
-생성 프로젝트는 realtime source와 제한 없는 application code를 분리합니다. 두 파일은 같은 manifest 기반 native state를 사용합니다.
-
-`src/main.spellwire.ts`:
+생성 프로젝트는 `src/main.ts` authoring surface 하나를 제공합니다. AOT compiler는 realtime handler를 bounded native VM으로 추출하고 제한 없는 lifecycle/overlay code는 Bun에 둡니다. 두 execution plane은 input path에 JavaScript를 넣지 않은 채 같은 manifest 기반 native state를 사용합니다.
 
 ```ts
-import { Key, rt, tapKey } from "spellwire";
+import { Key, Spellwire, rt, tapKey, ui } from "spellwire";
 
 let enabled = true;
 let presses = 0;
@@ -127,16 +125,9 @@ rt.hotkey("Q", () => {
 rt.hotkey("F8", () => {
   enabled = !enabled;
 }, { consume: false });
-```
-
-`src/app.ts`:
-
-```ts
-import { fileURLToPath } from "node:url";
-import { Spellwire, ui } from "spellwire";
 
 const app = await Spellwire.start({
-  input: fileURLToPath(new URL("./main.spellwire.ts", import.meta.url)),
+  input: import.meta.file,
   watch: Bun.argv.includes("--watch"),
   overlay: (state) => {
     const enabled = state.enabled === true;
@@ -174,6 +165,8 @@ const app = await Spellwire.start({
 
 await app.untilSignal();
 ```
+
+내부적으로 realtime execution과 제한 없는 application execution은 분리되지만 authoring file을 의무적으로 나누지 않습니다. `bun run start`, `watch`, `build`가 모두 같은 source를 사용합니다.
 
 상태 update 경로:
 

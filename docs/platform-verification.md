@@ -114,16 +114,17 @@ The command reports p50, p95, p99, p999, and maximum nanoseconds for zero-delta 
 
 ```bash
 target/release/spellwire-overlay --smoke
+target/release/spellwire-overlay --window-config '{"title":"Window policy smoke","transparent":false,"alwaysOnTop":false,"focusable":true,"clickThrough":false,"decorations":true,"resizable":true,"visible":false}' --smoke
 bun run test:overlay-live
 ```
 
 Success prints one JSON line and exits after roughly 350 ms:
 
 ```json
-{"event":"ready","width":3420,"height":2214,"alphaMode":"PostMultiplied"}
+{"event":"ready","width":3420,"height":2214,"scaleFactor":2,"alphaMode":"PostMultiplied","window":{"title":"Spellwire Overlay","transparent":true,"alwaysOnTop":true,"focusable":false,"clickThrough":true,"decorations":false,"resizable":false,"visible":true}}
 ```
 
-Dimensions and alpha mode depend on the monitor and GPU. Success requires positive dimensions and a valid `alphaMode`; the example values are not required.
+Dimensions, scale factor, and alpha mode depend on the monitor and GPU. Success requires positive dimensions, a valid `alphaMode`, and a `window` object matching the resolved requested policy; the example values are not required. The configured smoke starts hidden to avoid stealing focus while exercising the non-default flags.
 
 ## Windows verification
 

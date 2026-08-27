@@ -67,6 +67,8 @@ This abbreviated command list is the release gate, not the full setup guide. Win
 
 Public `Key` values use USB HID keyboard-page usages. Each backend has an explicit supported map and returns `unsupported USB HID key usage` instead of silently emitting a different key. Linux covers the full currently exported set. macOS and Windows omit usages their keyboard APIs cannot represent reliably; layout/media behavior should be checked on the target keyboard. Unknown vendor-page usages are intentionally not guessed.
 
-## Overlay limitations
+## Overlay window semantics
 
-The renderer requests a transparent, topmost, click-through window and keeps rendering isolated from the input worker. Windows and macOS provide the needed window semantics. Linux support depends on the active display server/compositor; Wayland does not expose one universal always-on-top layer-shell contract through winit, so verify the intended GNOME/KDE/wlroots environment.
+The native renderer accepts `transparent`, `alwaysOnTop`, `focusable`, `clickThrough`, `decorations`, `resizable`, and initial `visible` options; overlay-safe defaults are transparent, topmost, non-focusable, click-through, borderless, fixed-size, and visible. Rendering remains isolated from the input worker.
+
+macOS uses the prohibited activation policy when `focusable` is false and the accessory policy when true. Windows disables the native window when `focusable` is false. Linux behavior depends on the active display server/compositor; Wayland does not expose one universal always-on-top layer-shell or focus contract through winit. Verify the intended GNOME/KDE/wlroots environment. Primary-monitor selection and full-monitor startup geometry are currently fixed.

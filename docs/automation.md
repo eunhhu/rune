@@ -109,12 +109,10 @@ On macOS, physical Caps Lock arrives as a toggle-style `flagsChanged` event rath
 
 ## One state drives input and overlay
 
-Generated projects separate realtime source from unrestricted application code. Both sides use the same manifest-backed native states.
-
-`src/main.spellwire.ts`:
+Generated projects expose one `src/main.ts` authoring surface. The AOT compiler extracts realtime handlers into the bounded native VM; unrestricted lifecycle and overlay code stays on Bun. Both execution planes use the same manifest-backed native states without putting JavaScript on the input path.
 
 ```ts
-import { Key, rt, tapKey } from "spellwire";
+import { Key, Spellwire, rt, tapKey, ui } from "spellwire";
 
 let enabled = true;
 let presses = 0;
@@ -127,16 +125,9 @@ rt.hotkey("Q", () => {
 rt.hotkey("F8", () => {
   enabled = !enabled;
 }, { consume: false });
-```
-
-`src/app.ts`:
-
-```ts
-import { fileURLToPath } from "node:url";
-import { Spellwire, ui } from "spellwire";
 
 const app = await Spellwire.start({
-  input: fileURLToPath(new URL("./main.spellwire.ts", import.meta.url)),
+  input: import.meta.file,
   watch: Bun.argv.includes("--watch"),
   overlay: (state) => {
     const enabled = state.enabled === true;
@@ -174,6 +165,8 @@ const app = await Spellwire.start({
 
 await app.untilSignal();
 ```
+
+Realtime execution and unrestricted application execution remain separate internally; authoring files do not have to be. `bun run start`, `watch`, and `build` all consume this same source.
 
 Update path:
 

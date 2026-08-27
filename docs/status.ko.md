@@ -6,10 +6,10 @@ Spellwire는 README 구현 계획이 source에 반영된 초기 alpha입니다. 
 
 ## 구현 완료
 
-- TypeScript AST compiler, source diagnostic, portable hotkey parser, paired remap, module-scope named integer/boolean state, native 상태 gate, condition, loop, update, inline helper, held query, key/mouse intrinsic
-- versioned `SPWR` encoder/decoder와 structural/runtime validation
+- TypeScript AST compiler, source diagnostic, portable hotkey parser, paired remap, module-scope named integer/boolean state, direct state-immediate update, native 상태 gate, condition, loop, inline helper, held query, key/mouse intrinsic
+- versioned `SPWR` v4 encoder, v3/v4 decoder와 structural/runtime validation
 - bounded native VM stack/local/output batch/instruction budget/fixed trigger table
-- fixed-capacity continuation scheduler: `sleepUs()`가 observer worker를 block하지 않고 absolute deadline까지 yield
+- fixed-capacity continuation scheduler: `sleep.us/ms/seconds/minutes/hours()`가 wide/scaled delay opcode 하나로 lowering되고 observer worker를 block하지 않은 채 absolute deadline까지 yield
 - compatibility C ABI와 ABI v4 owned-host lifecycle/reload/scalar·bulk state/permission/error/dispatch/shared ring
 - Bun FFI `NativeHost`: start/stop, `.ts` memory compile, `.bin` manifest, serialized watch reload, name/kind state preservation
 - native observer에서 shared 6-word SPSC ring으로 연결되는 callback-free `DynamicInputLane`
@@ -18,7 +18,7 @@ Spellwire는 README 구현 계획이 source에 반영된 초기 alpha입니다. 
 - Linux evdev discovery/hotplug, dedicated uinput keyboard/mouse. 선택적 원본 입력 relay는 미구현
 - physical/synthetic recursion classification와 USB HID translation test
 - fill/stroke/radius/shadow/opacity/font style을 가진 상태 기반 Figma식 row/column/stack layout, keyed diff, 통합 lifecycle API
-- text/rect/ellipse/line, coalesced batch protocol, dirty raster, partial GPU upload를 가진 transparent/topmost/click-through retained overlay process
+- configurable native overlay window policy(transparent/topmost/focusable/click-through/decorated/resizable/visible), text/rect/ellipse/line, coalesced batch protocol, dirty raster, partial GPU upload
 - VM/overlay reconciliation/OS-submission percentile benchmark
 - cross-platform CI, Rust 1.81, npm dry-run, checksum, optional Windows/macOS signing/notarization artifact matrix
 
@@ -31,7 +31,7 @@ Spellwire는 README 구현 계획이 source에 반영된 초기 alpha입니다. 
 | observe → VM → inject → observe loopback | 통과 | 실제 장비 대기 | 실제 장비 대기 |
 | 원본 입력 차단 + 상태 gate pass-through | CoreGraphics head/tail probe 통과 | 실제 장비 대기 | 미구현 |
 | Bun shared dynamic lane | 통과 | 실제 장비 대기 | 실제 장비 대기 |
-| native transparent overlay smoke | 통과 | 실제 장비 대기 | display/compositor 대기 |
+| native overlay + configurable window-policy smoke | 통과 | 실제 장비 대기 | display/compositor 대기 |
 
 macOS loopback은 physical-source F19 명시 dispatch, native F20 injection, tagged synthetic re-observation, 두 번째 VM handler/state update를 사용합니다. OS loopback이며 물리 keyboard의 switch-to-application latency가 아닙니다.
 

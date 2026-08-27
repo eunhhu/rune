@@ -38,8 +38,9 @@ State and overlay can share one lifecycle without update boilerplate:
 import { Spellwire, ui } from "spellwire";
 
 const app = await Spellwire.start({
-  input: "src/main.spellwire.ts",
+  input: import.meta.file,
   watch: true,
+  overlayOptions: { window: { alwaysOnTop: true, focusable: false, clickThrough: true } },
   overlay: (state) => ui.column(
     { width: 280, padding: 16, gap: 8, fill: "#111827ee", radius: 16 },
     ui.text(state.enabled === true ? "Active" : "Paused"),
@@ -47,6 +48,8 @@ const app = await Spellwire.start({
 });
 await app.untilSignal();
 ```
+
+Both snippets can live in the same `src/main.ts`; only the `rt.*` handlers enter the native VM.
 
 `run` and `watch` compile source in memory and prepare platform permissions before native startup. `watch` only adds control-plane filesystem reload; native realtime dispatch stays callback-free. For deterministic compiler/VM integration testing, the repository also contains `spellwire-sim`.
 

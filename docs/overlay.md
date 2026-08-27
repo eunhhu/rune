@@ -9,12 +9,26 @@ For the matching realtime hotkey source and the complete input → native state 
 ## Complete state + overlay program
 
 ```ts
-import { fileURLToPath } from "node:url";
-import { Spellwire, ui } from "spellwire";
+import { Key, Spellwire, rt, tapKey, ui } from "spellwire";
+
+let enabled = true;
+let activations = 0;
+
+rt.hotkey("Q", () => {
+  activations++;
+  tapKey(Key.E);
+}, { when: () => enabled });
+
+rt.hotkey("F8", () => {
+  enabled = !enabled;
+}, { consume: false });
 
 const app = await Spellwire.start({
-  input: fileURLToPath(new URL("./main.spellwire.ts", import.meta.url)),
+  input: import.meta.file,
   watch: true,
+  overlayOptions: {
+    window: { title: "Spellwire Status", alwaysOnTop: true, clickThrough: true },
+  },
   overlay: (state) => {
     const enabled = state.enabled === true;
     return ui.column(
@@ -47,7 +61,7 @@ const app = await Spellwire.start({
 await app.untilSignal();
 ```
 
-`Spellwire.start()` owns the native host, permission request, optional source watcher, overlay process, state binding, and shutdown. `untilSignal()` handles `SIGINT`/`SIGTERM`, closes the renderer, stops the host, and releases held synthetic input.
+`Spellwire.start()` owns the native host, permission request, optional source watcher, overlay process, state binding, and shutdown. The compiler reads this same file but extracts only `rt.*` handlers for native execution; overlay code remains unrestricted Bun TypeScript. `untilSignal()` handles `SIGINT`/`SIGTERM`, closes the renderer, stops the host, and releases held synthetic input.
 
 The runnable repository version is [`examples/state-overlay.ts`](../examples/state-overlay.ts).
 
@@ -73,6 +87,12 @@ const app = await Spellwire.start({
 
 await app.refreshOverlay();
 ```
+
+## Reactivity model
+
+The root `overlay(state)` callback is React-like render/reconcile: one bulk named-state snapshot is compared shallowly, and any changed slot reruns that root callback. It is not automatic signal dependency tracking. The retained layer is still fine-grained: keyed primitives are compared individually, unchanged nodes produce no IPC, and the renderer redraws only affected bounds.
+
+For callback-level fine granularity, use `ui.bind(host.states.enabled, render)` or another narrow readable source. Only the changed binding callback reruns. This explicit split avoids proxies, dependency tracking, allocations, and JavaScript work in the realtime input path.
 
 ## UI API pool
 
@@ -148,6 +168,29 @@ Text supports:
 
 Colors are `#RRGGBB` or `#RRGGBBAA`. Parent opacity multiplies through descendants. Use visible text or shape changes with color for important states; do not make color the only status signal.
 
+## Native window options
+
+Configure native window behavior through `overlayOptions.window` (or `Overlay.mount(..., { window })` / `NativeOverlayRenderer.start({ window })`):
+
+```ts
+overlayOptions: {
+  window: {
+    title: "Macro status",
+    transparent: true,
+    alwaysOnTop: true,
+    focusable: false,
+    clickThrough: true,
+    decorations: false,
+    resizable: false,
+    visible: true,
+  },
+},
+```
+
+These values are the defaults except for the title. `clickThrough` controls pointer hit testing; `focusable` separately controls activation/focus. `visible: false` creates the renderer hidden until `show()`. The validated values are available at `app.overlay?.renderer.ready.window`.
+
+This is a native winit/wgpu window and surface, not a DOM, WebView, or compatibility UI. macOS uses the prohibited activation policy when non-focusable and the accessory policy when focusable; Windows disables a non-focusable window; Linux applies the hints exposed by winit. X11/Wayland compositor rules can differ, so Linux needs target-desktop verification. Primary-monitor full bounds remain fixed startup geometry; public multi-monitor routing is still pending.
+
 ## Direct binding without `Spellwire.start()`
 
 `ui.bind` accepts a single `NativeState`, a `NativeHost` snapshot source, a getter, or an object implementing `get()` / `snapshotStates()`:
@@ -165,7 +208,7 @@ const overlay = await Overlay.mount(
 
 Multiple bindings to the same source are read once per reconciliation pass. Prefer binding the host once when several values are displayed; it uses one bulk native snapshot instead of one call per state.
 
-`OverlayMountOptions.fps` accepts 0–240; zero means manual refresh. `executablePath` and `readyTimeoutMs` control native startup, while `onError` handles asynchronous refresh failures.
+`OverlayMountOptions.fps` accepts 0–240; zero means manual refresh. `executablePath`, `readyTimeoutMs`, and `window` control native startup, while `onError` handles asynchronous refresh failures.
 
 ## Low-level retained escape hatch
 
@@ -196,7 +239,7 @@ On the development macOS arm64 machine, three isolated runs of a 26-primitive st
 
 ## Current boundaries
 
-- The overlay is click-through and non-interactive.
+- Overlay-safe defaults are non-focusable and click-through; both policies are configurable. Interactive controls/widgets are not yet included.
 - System and monospace font families are supported; arbitrary font-file loading is not yet public.
 - The primary monitor is used; multi-monitor routing is not yet public.
 - Images, arbitrary vector paths, clipping, and animation are not yet public APIs.
@@ -210,4 +253,4 @@ target/release/spellwire-overlay --smoke
 bun run test:overlay-live
 ```
 
-The executable smoke prints one `ready` JSON object with physical surface dimensions, monitor scale factor, and alpha mode. The live smoke additionally starts a real host, writes named state, bulk-snapshots it, updates two retained text nodes, and verifies clean shutdown.
+The executable smoke prints one `ready` JSON object with physical surface dimensions, monitor scale factor, alpha mode, and resolved window policy. The live smoke additionally starts a real host, verifies configured/default window options, writes named state, bulk-snapshots it, updates two retained text nodes, and verifies clean shutdown.

@@ -45,7 +45,9 @@ On macOS arm64, the following passed:
 - global tagged F20 injection observed through `CGEventTap` and handled by the synthetic VM trigger;
 - CoreGraphics suppression probe: baseline/inactive-gate transitions `2/2`, active native handler hit `1`, forwarded transitions `0`;
 - native observer publication into `DynamicInputLane` with zero drops in the smoke scenario;
-- transparent click-through overlay creation at Retina resolution and mutation rendering;
+- default transparent/topmost/non-focusable/click-through overlay plus hidden opaque/focusable/decorated/resizable non-default policy creation at Retina resolution;
+- live overlay mutation rendering with the resolved window policy returned to Bun;
+- direct state-immediate VM workload over 200,000 local samples: 42 ns p50, 84 ns p95, and 84 ns p99 for trigger lookup + VM + null injection;
 - native OS-submission benchmark execution.
 
 Windows x64 and Linux x64 backend code also passes local cross-target Clippy. That proves compilation, not live permissions/device/display behavior. Windows suppression still needs a target-machine run; Linux suppression is not implemented and its capability bit remains unset.

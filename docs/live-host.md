@@ -10,7 +10,7 @@ Spellwire deliberately separates realtime work from ordinary TypeScript:
 
 | Part | Runs in | Appropriate work |
 | --- | --- | --- |
-| Realtime handler | Bounded native VM | State updates, conditions, bounded loops, held checks, key/mouse output, `sleepUs()` |
+| Realtime handler | Bounded native VM | State updates, conditions, bounded loops, held checks, key/mouse output, unit-based `sleep.*()` |
 | Native host | Native worker and OS backend | Global observation, injection, delayed continuations, state storage |
 | Control plane | Bun | Loading, permission checks, hot reload, logging, UI, files, network calls |
 | Dynamic lane | Bun over a shared ring | Best-effort reactions to observed input that do not need realtime guarantees |
@@ -144,7 +144,7 @@ bun packages/spellwire/src/cli.ts run macro.spellwire.bin --manifest configs/mac
 | `spellwire watch [source-or-binary]` | Start the same path with serialized hot reload |
 | `spellwire compile [source] [output]` | AOT compile and write the binary plus state manifest |
 
-The default input for all three commands is `src/main.spellwire.ts`. `--library <path>` overrides native library discovery; `--manifest <path>` overrides the adjacent manifest for compiled input.
+The default input for all three commands is `src/main.ts`, falling back to legacy `src/main.spellwire.ts` when present. `--library <path>` overrides native library discovery; `--manifest <path>` overrides the adjacent manifest for compiled input.
 
 ## Use the unified programmatic API
 

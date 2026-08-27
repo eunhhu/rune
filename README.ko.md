@@ -24,7 +24,7 @@ bun run build  # dist/main.spellwire.bin과 manifest 생성
 
 `start`와 `watch`는 네이티브 호스트를 시작하기 전에 플랫폼 권한을 자동으로 확인하고 요청합니다.
 
-생성 프로젝트의 `src/app.ts`에는 상태 기반 modern overlay도 포함됩니다. `Spellwire.start()`와 Figma식 `ui.row`/`ui.column` auto layout을 사용하므로 수동 update loop 없이 realtime 로직과 UI를 분리해 편집할 수 있습니다.
+생성 프로젝트는 realtime handler와 상태 기반 modern overlay를 `src/main.ts` 하나에 둡니다. compiler는 bounded handler만 native VM용으로 추출하고 제한 없는 application/overlay 코드는 Bun에 남깁니다. `Spellwire.start()`가 수동 update loop 없이 두 lifecycle을 함께 관리합니다.
 
 ## API 한눈에 보기
 
@@ -34,14 +34,15 @@ bun run build  # dist/main.spellwire.bin과 manifest 생성
 | key remap | `rt.remap("CapsLock", "Escape")` |
 | 영속 상태 | module-scope `let enabled = true` |
 | 키보드/마우스 출력 | `tapKey`, `keyDown`, `clickMouse`, `moveMouse`, `wheelMouse` |
-| 지연 | `sleepUs(microseconds)` |
+| 지연 | `sleep.ms(250)`, `sleep.seconds(2)` 또는 단위별 helper |
 | 입력 + watch + UI 시작 | `Spellwire.start(options)` |
 | Overlay layout | `ui.row`, `ui.column`, `ui.panel`, `ui.stack` |
 | Overlay content | `ui.text`, `ui.ellipse`, `ui.dot`, `ui.badge`, `ui.divider` |
 | 상태 기반 UI | `overlay: state => ...`, `ui.bind`, `ui.when` |
 | UI style | `width`, `height`, `padding`, `gap`, `fill`, `stroke`, `shadow`, `opacity`, font prop |
+| Overlay window | `overlayOptions.window` (`alwaysOnTop`, `transparent`, `focusable`, `clickThrough` 등) |
 
-signature, 기본값, option 표, 완전한 state-to-overlay 앱, 현재 window 정책 한계는 **[한 페이지 API 레퍼런스](docs/api.ko.md)**에서 모두 찾을 수 있습니다. 일반 API를 찾기 위해 자동화와 overlay 문서를 오갈 필요가 없습니다.
+signature, 기본값, option 표, 완전한 state-to-overlay 앱, native window 정책과 플랫폼 caveat는 **[한 페이지 API 레퍼런스](docs/api.ko.md)**에서 모두 찾을 수 있습니다. 일반 API를 찾기 위해 자동화와 overlay 문서를 오갈 필요가 없습니다.
 
 첫 npm 배포 이후 기존 프로젝트에 직접 설치하려면 다음 명령을 사용합니다.
 
@@ -85,7 +86,7 @@ bun run build
 결과는 `dist/main.spellwire.bin`과 `dist/main.spellwire.bin.json`입니다. 다른 파일을 직접 컴파일하려면 다음과 같이 실행합니다.
 
 ```bash
-bunx spellwire compile src/main.spellwire.ts
+bunx spellwire compile src/main.ts
 ```
 
 출력 경로를 생략한 직접 CLI 컴파일은 입력 파일 옆에 결과를 만듭니다.
@@ -125,7 +126,7 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 | 명시적 dispatch 및 owned-host C ABI | 구현 완료 |
 | Bun FFI 호스트, 명명 상태, watch/reload, SPSC lane | 구현 완료 |
 | Windows `SendInput`, macOS `CGEventPost`, Linux evdev/uinput | 구현 완료, macOS 실제 검증 완료 |
-| 상태 기반 auto-layout overlay, modern style, retained dirty update | 구현 완료, macOS 실제 검증 완료 |
+| 상태 기반 auto-layout overlay, modern style, configurable native window 정책, retained dirty update | 구현 완료, macOS 실제 검증 완료 |
 | 플랫폼별 prebuilt/signing workflow | 구현 완료, 배포 자격 증명 필요 |
 | 물리 입력부터 대상 앱까지의 마이크로초 지연 보장 | 주장하지 않음 |
 

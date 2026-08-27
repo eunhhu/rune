@@ -38,7 +38,7 @@ compiler는 source를 실행하지 않고 parse하며 top-level `rt.hotkey`, `rt
 
 `SPWR`은 version header 뒤에 resource limit, state, handler, bytecode를 저장합니다. `Program::decode`는 구조 경계를 검증하고 `Runtime::new`는 dispatch 전에 entry, jump, slot, stack behavior, budget을 확인합니다.
 
-runtime은 direct source × device × edge × code trigger table, fixed held-input bitmap, fixed VM stack/local/output storage, fixed-capacity continuation scheduler를 사용합니다. zero-delay instruction은 한 output batch가 됩니다. `sleepUs()`는 batch를 flush하고 absolute monotonic deadline과 함께 handler를 yield합니다. owned host는 새 input/control command를 계속 받으면서 ready continuation을 poll합니다.
+runtime은 direct source × device × edge × code trigger table, fixed held-input bitmap, fixed VM stack/local/output storage, fixed-capacity continuation scheduler를 사용합니다. 흔한 state/immediate update는 stack traffic을 우회합니다. zero-delay instruction은 한 output batch가 됩니다. 모든 `sleep.*()` unit helper는 wide/scaled delay opcode 하나로 lowering되어 batch를 flush하고 absolute monotonic deadline과 함께 handler를 yield합니다. owned host는 새 input/control command를 계속 받으면서 ready continuation을 poll합니다.
 
 간단한 embedder를 위한 lower-level compatibility engine은 synchronous delay를 유지합니다.
 

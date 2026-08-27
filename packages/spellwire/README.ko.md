@@ -38,8 +38,9 @@ bunx spellwire compile macro.spellwire.ts
 import { Spellwire, ui } from "spellwire";
 
 const app = await Spellwire.start({
-  input: "src/main.spellwire.ts",
+  input: import.meta.file,
   watch: true,
+  overlayOptions: { window: { alwaysOnTop: true, focusable: false, clickThrough: true } },
   overlay: (state) => ui.column(
     { width: 280, padding: 16, gap: 8, fill: "#111827ee", radius: 16 },
     ui.text(state.enabled === true ? "Active" : "Paused"),
@@ -47,6 +48,8 @@ const app = await Spellwire.start({
 });
 await app.untilSignal();
 ```
+
+두 code block은 같은 `src/main.ts`에 둘 수 있고 `rt.*` handler만 native VM으로 들어갑니다.
 
 자세한 내용:
 

@@ -2,7 +2,7 @@
 
 [English](typescript-runtime.md)
 
-Spellwire는 TypeScript를 authoring language로 사용하고 지연에 민감한 subset을 AOT compile합니다. 별도 `rt.load()` wrapper는 필요하지 않으며 `.spellwire.ts` module 자체가 compilation unit입니다.
+Spellwire는 TypeScript를 authoring language로 사용하고 지연에 민감한 subset을 AOT compile합니다. 별도 `rt.load()` wrapper나 특수 확장자는 필요하지 않으며 `.ts`와 관례적인 `.spellwire.ts` 모두 compilation unit으로 사용할 수 있습니다.
 
 ## Compile 경계
 
@@ -34,6 +34,8 @@ rt.onKeyDown(Key.Q, () => {
 ```
 
 값은 dispatch 사이에 유지됩니다. manifest는 source name과 native slot/kind mapping을 기록합니다. live reload는 이름과 kind가 같은 state를 보존하므로 선언 순서 변경이 값을 뒤섞지 않습니다. module-scope `const`는 가능하면 compile-time constant로 fold됩니다.
+
+runtime state lookup은 numeric입니다. constant store, `state++`/`--`, `state += constant`, `state ^= constant`, `booleanState = !booleanState` 같은 discarded update는 stack traffic 없이 direct slot/immediate opcode 하나로 fuse됩니다. 일반 식도 bounded native bytecode로 실행되며 어느 경로도 JavaScript나 FFI를 호출하지 않습니다.
 
 ## Trigger-level 상태 gate
 
@@ -108,16 +110,22 @@ mouseUp(MouseButton.Left)
 clickMouse(MouseButton.Left)
 moveMouse(4, -2)
 wheelMouse(0, 1)
-sleepUs(75)
+sleep.us(75)
+sleep.ms(250)
+sleep.seconds(2)
+sleep.minutes(1)
+sleep.hours(1)
 keyHeld(Key.LeftShift)
 mouseHeld(MouseButton.Right)
 ```
 
-compiler는 이 이름을 native opcode로 변환합니다.
+named form인 `sleepUs`, `sleepMs`, `sleepSeconds`, `sleepMinutes`, `sleepHours`도 같습니다. compiler는 이 call을 native opcode로 변환합니다.
 
 ## Delay
 
-`sleepUs(n)`은 pending output batch를 flush하고 absolute monotonic deadline을 진행합니다. live host는 continuation을 fixed-capacity queue에 저장했다가 deadline에 resume하므로 그동안 다른 input과 control command를 받을 수 있습니다. zero-duration yield는 같은 poll에서 resume할 수 있습니다.
+모든 delay helper는 pending output batch를 flush하고 absolute monotonic deadline을 진행합니다. constant unit은 compile time에 scale하고 dynamic duration은 같은 wide `DelayUs` instruction에 unit scale을 넣습니다. 따라서 call 하나는 JavaScript conversion이나 추가 timer 없이 delay opcode 하나입니다. live host는 continuation을 fixed-capacity queue에 저장했다가 deadline에 resume하므로 그동안 다른 input과 control command를 받을 수 있습니다. zero-duration yield는 같은 poll에서 resume할 수 있습니다.
+
+bytecode는 과거 unsigned 32-bit 제한 대신 non-negative signed 64-bit microsecond duration을 표현합니다. multiplication과 deadline addition을 checked 처리하므로 overflow가 과거 deadline으로 wrap되지 않습니다.
 
 compatibility engine과 simulator는 동기 waiting을 유지합니다. 비차단 live observation에는 `NativeHost`를 사용하십시오. desktop OS는 hard realtime scheduler가 아니므로 microsecond 문법은 요청 deadline이지 물리 end-to-end 보장이 아닙니다.
 

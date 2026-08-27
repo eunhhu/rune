@@ -37,7 +37,7 @@ Capability bits are:
 
 Windows and macOS return `0x77`: every bit above except `NativeOverlay`. Linux returns `0x37` because its evdev backend does not yet provide an exclusive pass-through relay for original-input suppression. Permission bits are `1 << 0` observe and `1 << 1` inject.
 
-ABI version `4` and bytecode wire version `3` are independent. Wire v3 handler records include modifier/repeat/consume policy and an optional native state gate.
+ABI version `4` and bytecode wire version `4` are independent. Wire v4 adds signed 64-bit/scaled delay encoding plus direct state-immediate opcodes. The decoder remains backward-compatible with wire v3, whose handler records already include modifier/repeat/consume policy and an optional native state gate.
 
 ## Owned platform host
 

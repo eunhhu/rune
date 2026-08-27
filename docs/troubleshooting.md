@@ -53,7 +53,7 @@ Common causes:
 
 See [TypeScript Runtime](typescript-runtime.md).
 
-## `sleepUs()` is inaccurate
+## A `sleep.*()` delay is inaccurate
 
 The live host uses absolute deadlines and non-blocking continuations, but a general-purpose desktop OS is not a hard realtime scheduler. The compatibility engine/simulator executes delays synchronously, so long waits make simulation appear paused.
 

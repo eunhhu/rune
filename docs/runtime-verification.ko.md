@@ -45,7 +45,9 @@ macOS arm64에서 다음 항목을 통과했습니다.
 - tagged F20 `CGEventPost` injection → `CGEventTap` observation → synthetic VM trigger
 - CoreGraphics suppression probe: baseline/inactive-gate transition `2/2`, active native handler hit `1`, forwarded transition `0`
 - `DynamicInputLane` publication과 smoke scenario drop 0
-- Retina resolution transparent click-through overlay creation/mutation rendering
+- Retina resolution의 기본 transparent/topmost/non-focusable/click-through overlay와 hidden opaque/focusable/decorated/resizable non-default 정책 생성
+- Bun에 resolved window 정책을 반환하는 live overlay mutation rendering
+- direct state-immediate VM workload 200,000회 local sample: trigger lookup + VM + null injection 기준 p50 42ns, p95 84ns, p99 84ns
 - native OS-submission benchmark
 
 Windows x64와 Linux x64 backend는 macOS에서 cross-target Clippy를 통과했습니다. 이는 compile 근거이지 live permission/device/display 동작 근거가 아닙니다. Windows suppression은 대상 장비 검증이 남았고 Linux suppression은 미구현이라 capability bit가 설정되지 않습니다.

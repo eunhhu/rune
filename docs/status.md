@@ -6,10 +6,10 @@ Spellwire is an early alpha with the README implementation plan represented in s
 
 ## Implemented
 
-- TypeScript AST compiler, source diagnostics, portable hotkey parser, paired remaps, module-scope named integer/boolean state, native state gates, conditions, loops, updates, inlined helpers, held checks, and key/mouse intrinsics;
-- versioned `SPWR` encoder/decoder and structural/runtime validation;
+- TypeScript AST compiler, source diagnostics, portable hotkey parser, paired remaps, module-scope named integer/boolean state, direct state-immediate updates, native state gates, conditions, loops, inlined helpers, held checks, and key/mouse intrinsics;
+- versioned `SPWR` v4 encoder, v3/v4 decoder, and structural/runtime validation;
 - bounded native VM stack, locals, output batch, instruction budget, and fixed trigger table;
-- fixed-capacity continuation scheduler: `sleepUs()` yields until an absolute monotonic deadline without blocking the observer worker;
+- fixed-capacity continuation scheduler: `sleep.us/ms/seconds/minutes/hours()` lowers to one wide/scaled delay opcode and yields until an absolute monotonic deadline without blocking the observer worker;
 - compatibility engine C ABI plus ABI v4 owned-host lifecycle, reload, scalar/bulk state, permissions, error, dispatch, and shared input-ring APIs;
 - Bun FFI `NativeHost` with start/stop, `.ts` in-memory compilation, `.bin` manifest loading, serialized watch reload, and state preservation by source name and kind;
 - callback-free `DynamicInputLane` connection from the native observer through a shared six-word SPSC record ring;
@@ -18,7 +18,7 @@ Spellwire is an early alpha with the README implementation plan represented in s
 - Linux evdev discovery/hotplug observation and a dedicated uinput keyboard/mouse device; selective original-input relay remains pending;
 - explicit physical/synthetic recursion classification and supported USB HID translation tests;
 - state-driven Figma-style row/column/stack layout with fill/stroke/radius/shadow/opacity/font styling, keyed diff, and unified lifecycle API;
-- transparent, topmost, click-through retained overlay process with text/rect/ellipse/line nodes, coalesced batch protocol, dirty raster, and partial GPU uploads;
+- configurable native overlay window policy (transparent/topmost/focusable/click-through/decorated/resizable/visible) plus text/rect/ellipse/line nodes, coalesced batch protocol, dirty raster, and partial GPU uploads;
 - VM, overlay reconciliation, and native OS-submission percentile benchmark commands;
 - cross-platform CI, Rust 1.81 check, npm dry-runs, and release artifact matrix with checksums and optional Windows/macOS signing plus macOS notarization.
 
@@ -31,7 +31,7 @@ Spellwire is an early alpha with the README implementation plan represented in s
 | Global observe → VM → inject → observe loopback | Passed | Target-machine run pending | Target-machine run pending |
 | Original input suppression + state-gated pass-through | Passed with CoreGraphics head/tail probe | Target-machine run pending | Not implemented |
 | Bun shared dynamic lane | Passed | Target-machine run pending | Target-machine run pending |
-| Native transparent overlay smoke | Passed | Target-machine run pending | Display/compositor run pending |
+| Native overlay + configurable window-policy smoke | Passed | Target-machine run pending | Display/compositor run pending |
 
 The macOS loopback uses a physical-source F19 dispatch, native F20 injection, tagged synthetic re-observation, and a second VM handler/state update. This is an OS loopback test, not a physical keyboard switch-to-application latency claim.
 

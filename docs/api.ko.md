@@ -15,24 +15,22 @@
 | 키 하나 remap | `rt.remap("CapsLock", "Escape")` | [실시간 handler 등록](#실시간-handler-등록) |
 | native 상태 유지 | module-scope `let enabled = true` | [영속 realtime 상태](#영속-realtime-상태) |
 | 키보드/마우스 출력 | `tapKey`, `clickMouse`, `moveMouse` | [출력 및 held intrinsic](#출력-및-held-intrinsic) |
-| handler 지연 | `sleepUs(250_000)` | [출력 및 held intrinsic](#출력-및-held-intrinsic) |
+| handler 지연 | `sleep.ms(250)` 또는 `sleep.seconds(2)` | [출력 및 held intrinsic](#출력-및-held-intrinsic) |
 | 입력, watch, UI 함께 시작 | `Spellwire.start(options)` | [통합 앱 수명 주기](#통합-application-lifecycle) |
 | 상태를 overlay에 표시 | `overlay: state => ui.text(...)` | [Modern overlay](#modern-overlay) |
 | row, column, panel, stack 구성 | `ui.row`, `ui.column`, `ui.panel` | [UI 생성 함수](#ui-생성-함수) |
 | 크기, padding, gap, fill, border, shadow, font 설정 | element prop | [Layout과 visual 속성](#layout과-visual-속성) |
 | UI 일부만 state binding | `ui.bind(state, render)` | [Binding과 refresh](#binding과-refresh) |
 | UI 표시, 숨김, 수동 갱신 | `overlay.show()`, `hide()`, `app.refreshOverlay()` | [Overlay 수명 주기](#overlay-수명-주기) |
-| topmost/transparency/focus 설정 | 현재 고정 native 정책 | [Window 동작](#window-동작) |
+| topmost/transparency/focus 설정 | `overlayOptions.window` | [Window 동작](#window-동작) |
 | native host 직접 제어 | `NativeHost` | [Native host와 권한](#native-host와-권한) |
 
 ## 바로 실행 가능한 전체 앱
 
-생성 프로젝트가 이미 이 두 파일 구조를 제공합니다. realtime 코드는 native bytecode로 compile되고, `app.ts`가 권한, hot reload, 상태 snapshot, native overlay 수명 주기를 소유합니다.
-
-`src/main.spellwire.ts`:
+생성 프로젝트는 `src/main.ts` 하나를 제공합니다. compiler는 realtime handler만 native bytecode로 추출하고 같은 파일의 제한 없는 application/overlay 코드는 Bun에 둡니다. authoring은 하나로 합치면서 input event path에는 JavaScript를 넣지 않습니다.
 
 ```ts
-import { Key, rt, tapKey } from "spellwire";
+import { Key, Spellwire, rt, tapKey, ui } from "spellwire";
 
 let enabled = true;
 let presses = 0;
@@ -47,17 +45,11 @@ rt.hotkey("F8", () => {
 }, { consume: false });
 
 rt.remap("CapsLock", "Escape", { when: () => enabled });
-```
-
-`src/app.ts`:
-
-```ts
-import { fileURLToPath } from "node:url";
-import { Spellwire, ui } from "spellwire";
 
 const app = await Spellwire.start({
-  input: fileURLToPath(new URL("./main.spellwire.ts", import.meta.url)),
+  input: import.meta.file,
   watch: Bun.argv.includes("--watch"),
+  overlayOptions: { window: { title: "Spellwire Status" } },
   overlay: (state) => {
     const enabled = state.enabled === true;
     return ui.column(
@@ -119,7 +111,7 @@ bunx spellwire watch [macro.spellwire.ts]
 bunx spellwire compile macro.spellwire.ts [output.spellwire.bin]
 ```
 
-입력을 생략하면 `src/main.spellwire.ts`를 사용합니다. `run`과 `watch`는 메모리에서 compile하고 권한을 한 번 준비합니다. `watch`는 control-plane file reload만 추가합니다.
+입력을 생략하면 `src/main.ts`, 없으면 legacy `src/main.spellwire.ts`를 사용합니다. CLI `run`/`watch`는 realtime native host만 실행하고 생성 프로젝트의 `bun run start`/`watch`는 overlay를 포함한 통합 application을 실행합니다. 둘 다 realtime handler를 메모리에서 compile하고 권한을 한 번 준비합니다. watch mode는 control-plane file reload만 추가합니다.
 
 ## Package import
 
@@ -145,6 +137,11 @@ import {
   moveMouse,
   parseHotkey,
   rt,
+  sleep,
+  sleepHours,
+  sleepMinutes,
+  sleepMs,
+  sleepSeconds,
   sleepUs,
   tapKey,
   ui,
@@ -174,7 +171,7 @@ rt.hotkey("F8", () => {
 });
 ```
 
-대입, compound 대입, `++`/`--`, 정수 산술, 비교, boolean logic, bit 연산, 조건, 제한 반복은 native VM opcode로 compile됩니다. realtime dispatch에는 state 이름 lookup, JavaScript object, FFI가 없습니다. module-scope `const`는 정적으로 표현할 수 있으면 fold됩니다.
+대입, compound 대입, `++`/`--`, 정수 산술, 비교, boolean logic, bit 연산, 조건, 제한 반복은 native VM opcode로 compile됩니다. realtime dispatch에는 state 이름 lookup, JavaScript object, FFI가 없습니다. `count++`, `count += 4`, `mask ^= 1`, `enabled = !enabled`, constant store 같은 흔한 discarded update는 VM stack 왕복 없이 slot/immediate opcode 하나로 바로 compile됩니다. module-scope `const`는 정적으로 표현할 수 있으면 fold됩니다.
 
 상태는 dispatch 사이에 유지됩니다. source reload는 `preserveState: false`가 아니면 같은 이름과 kind의 값을 보존합니다. `when`은 native suppression table도 dispatch 전에 같은 gate를 평가해야 하므로 module-scope boolean 하나 또는 그 부정만 받습니다.
 
@@ -272,12 +269,16 @@ mouseUp(MouseButton.Left)
 clickMouse(MouseButton.Left)
 moveMouse(12, -4)
 wheelMouse(0, 1)
-sleepUs(80)
+sleep.us(80)
+sleep.ms(250)
+sleep.seconds(2)
+sleep.minutes(1)
+sleep.hours(1)
 keyHeld(Key.LeftShift)
 mouseHeld(MouseButton.Right)
 ```
 
-zero-delay 출력은 고정 native output batch로 모입니다. live host에서 `sleepUs()`는 batch를 flush하고 fixed-capacity absolute-deadline scheduler에 continuation을 양보합니다. compatibility engine과 simulator는 동기 대기합니다.
+zero-delay 출력은 고정 native output batch로 모입니다. live host에서 모든 `sleep.*()` helper는 batch를 flush하고 fixed-capacity absolute-deadline scheduler에 continuation을 양보합니다. compatibility engine과 simulator는 동기 대기합니다.
 
 | API | Native 동작 |
 | --- | --- |
@@ -287,9 +288,13 @@ zero-delay 출력은 고정 native output batch로 모입니다. live host에서
 | `clickMouse(button)` | mouse down/up 한 쌍 출력 |
 | `moveMouse(dx, dy)` | 상대 pointer 이동 출력 |
 | `wheelMouse(x, y)` | 수평/수직 wheel 이동 출력 |
-| `sleepUs(duration)` | output flush 후 monotonic deadline까지 yield |
+| `sleep.us(duration)` / `sleepUs(duration)` | microsecond |
+| `sleep.ms(duration)` / `sleepMs(duration)` | millisecond |
+| `sleep.seconds(duration)` / `sleepSeconds(duration)` | second |
+| `sleep.minutes(duration)` / `sleepMinutes(duration)` | minute |
+| `sleep.hours(duration)` / `sleepHours(duration)` | hour |
 
-현재 microsecond helper만 있습니다. 직접 변환하십시오: `250 ms = sleepUs(250_000)`, `2 s = sleepUs(2_000_000)`, `1 min = sleepUs(60_000_000)`. 지연 하나는 unsigned 32-bit microsecond에 들어가야 하므로 최대 `4_294_967_295 µs`, 약 71분 35초입니다. 현재 `sleepMs`, `sleepSeconds`, `sleepMinutes`, `sleepHours` export는 없습니다.
+namespace 형태가 가장 짧고 named helper는 직접 import할 때 편합니다. constant duration은 compile time에 scale합니다. dynamic duration도 같은 `DelayUs` instruction immediate에 unit scale을 담으므로 helper call은 native delay opcode 하나입니다. realtime path에 conversion callback, 추가 timer, JavaScript 작업이 없습니다. encoded microsecond는 non-negative signed 64-bit이고 platform이 표현할 수 없는 deadline은 wrap하지 않고 오류가 됩니다. JavaScript fallback은 input과 변환 결과에 safe integer도 요구합니다.
 
 held 함수는 VM이 handler 실행 전에 갱신한 input-state bitmap을 읽으므로 platform query가 없습니다. 일반 Bun 코드에서 output intrinsic을 직접 호출하면 `withRealtimeActionSink()`가 없는 경우 오류가 발생합니다.
 
@@ -420,7 +425,7 @@ host는 package library, `SPELLWIRE_NATIVE_LIBRARY`, workspace release/debug bui
 
 ```ts
 const app = await Spellwire.start({
-  input: "src/main.spellwire.ts",
+  input: import.meta.file,
   watch: true,
   overlay: (state) => ui.text(String(state.count ?? 0)),
 });
@@ -432,7 +437,7 @@ await app.untilSignal();
 
 | `SpellwireStartOptions` | 기본값 | 계약 |
 | --- | --- | --- |
-| `input` | `"src/main.spellwire.ts"` | realtime TypeScript 또는 compiled `.bin` 경로 |
+| `input` | `"src/main.ts"`, 이후 legacy source | realtime TypeScript 또는 compiled `.bin` 경로 |
 | `watch` | `false` | input source를 감시하고 native program reload |
 | `debounceMs` | host 기본값 | file reload debounce |
 | `preserveState` | `true` | reload 때 compatible named state 보존 |
@@ -440,7 +445,7 @@ await app.untilSignal();
 | `onReload` | — | watch reload 성공 후 호출 |
 | `onError` | console/기본 전파 | watch 또는 asynchronous overlay failure 수신 |
 | `overlay(state)` | — | shallow named-state snapshot으로 overlay 생성 |
-| `overlayOptions` | — | 아래 polling 및 renderer startup option |
+| `overlayOptions` | — | 아래 polling, renderer startup, native window option |
 | `nativeLibraryPath` | 자동 탐색 | native library 직접 지정 |
 | `manifestPath` | 인접 manifest | compiled binary의 manifest 직접 지정 |
 
@@ -573,6 +578,7 @@ const overlay = await Overlay.mount(tree, {
   fps: 30,
   executablePath: "/optional/spellwire-overlay",
   readyTimeoutMs: 5_000,
+  window: { title: "Status", alwaysOnTop: true, clickThrough: true },
   onError: console.error,
 });
 
@@ -588,6 +594,7 @@ await overlay.close();
 | `fps` | `30` | 초당 binding poll, `0`은 manual refresh; 0–240 |
 | `executablePath` | 자동 탐색 | native renderer 직접 지정 |
 | `readyTimeoutMs` | `5_000` | renderer startup timeout |
+| `window` | overlay용 안전 기본값 | native window 정책; 아래 표 참고 |
 | `onError` | console | asynchronous refresh error callback |
 | `renderer` | 새로 생성 | 기존 `NativeOverlayRenderer` 재사용; `SpellwireStartOptions.overlayOptions`에서는 사용 불가 |
 
@@ -595,19 +602,41 @@ await overlay.close();
 
 ### Window 동작
 
-현재 window 정책은 고정이며 `OverlayMountOptions`에서 설정할 수 없습니다.
+`OverlayMountOptions.window`, `SpellwireStartOptions.overlayOptions.window`, low-level `NativeOverlayRenderer.start({ window })`가 같은 정책을 사용합니다.
 
-| 동작 | 현재 값 |
-| --- | --- |
-| Transparent framebuffer | 활성 |
-| Always on top | 활성 |
-| Decoration / resize | 비활성 |
-| Pointer hit test | 비활성, click-through |
-| 초기 monitor와 size | primary monitor 전체 영역 |
-| Show/hide | runtime method 지원 |
-| Focusable / non-activating 보장 | public option 없음; 플랫폼 전체에서 보장하지 않음 |
+| `OverlayWindowOptions` | 기본값 | Native 요청 |
+| --- | --- | --- |
+| `title` | `"Spellwire Overlay"` | 1–256자 window title |
+| `transparent` | `true` | alpha surface와 transparent window |
+| `alwaysOnTop` | `true` | always-on-top window level |
+| `focusable` | `false` | overlay activation/focus 허용 여부 |
+| `clickThrough` | `true` | true이면 pointer hit testing 비활성 |
+| `decorations` | `false` | native title bar/border |
+| `resizable` | `false` | user resize 허용 |
+| `visible` | `true` | 초기 표시; 이후 `show()` / `hide()` 가능 |
 
-transparency, topmost, focusability, click-through, monitor 선택, position, size, taskbar 표시, decoration은 현재 public window option이 아닙니다. pointer click-through만으로 OS가 window에 focus를 절대 주지 않는다고 보장할 수 없습니다. Linux topmost/transparency는 compositor에 의존합니다.
+```ts
+const app = await Spellwire.start({
+  input: import.meta.file,
+  overlayOptions: {
+    window: {
+      title: "Macro status",
+      transparent: true,
+      alwaysOnTop: true,
+      focusable: false,
+      clickThrough: true,
+      decorations: false,
+      resizable: false,
+      visible: true,
+    },
+  },
+  overlay: (state) => ui.text(String(state.enabled ?? false)),
+});
+```
+
+ready message의 `overlay.renderer.ready.window`에서 validate 및 default resolve가 끝난 요청 정책을 확인할 수 있습니다. renderer는 native winit/wgpu process이며 WebView compatibility layer가 없습니다. `focusable`과 `clickThrough`는 별도입니다. focusable window도 pointer hit을 무시할 수 있고 non-focusable window도 pointer hit을 받을 수 있습니다. macOS는 non-focusable일 때 prohibited activation policy, focusable일 때 accessory policy를 사용하고 Windows는 non-focusable일 때 native window를 disable하며 Linux는 가능한 winit/compositor hint를 사용합니다. 모든 X11/Wayland compositor에서 focus/topmost가 완전히 같다고 보장할 수 없으므로 대상 Linux desktop에서 검증해야 합니다.
+
+초기 monitor와 size는 아직 primary monitor 전체 영역입니다. monitor routing과 명시적 window geometry는 public API가 아닙니다. Windows에서는 `focusable: false`이면 window도 non-interactive입니다. interactive decorated tool window에는 `focusable: true`를 사용하십시오.
 
 ### Low-level retained overlay
 

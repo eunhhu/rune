@@ -35,7 +35,7 @@ uint32_t spellwire_request_permissions(void);
 
 Windows와 macOS는 `NativeOverlay`를 제외한 `0x77`을 반환합니다. Linux evdev backend에는 아직 원본 입력 차단용 exclusive pass-through relay가 없어 `0x37`을 반환합니다. permission bit는 `1 << 0` observe, `1 << 1` inject입니다.
 
-ABI version `4`와 bytecode wire version `3`은 독립적입니다. wire v3 handler record에는 modifier/repeat/consume policy와 optional native state gate가 들어갑니다.
+ABI version `4`와 bytecode wire version `4`는 독립적입니다. wire v4는 signed 64-bit/scaled delay encoding과 direct state-immediate opcode를 추가합니다. decoder는 modifier/repeat/consume policy와 optional native state gate를 이미 포함한 wire v3도 계속 읽습니다.
 
 ## Owned platform host
 

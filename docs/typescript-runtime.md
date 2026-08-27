@@ -2,7 +2,7 @@
 
 [한국어](typescript-runtime.ko.md)
 
-Spellwire uses TypeScript as an authoring language and compiles the latency-sensitive subset ahead of time. A source file does not need a wrapper such as `rt.load()`; the `.spellwire.ts` module itself is the compilation unit.
+Spellwire uses TypeScript as an authoring language and compiles the latency-sensitive subset ahead of time. A source file does not need a wrapper such as `rt.load()` or a special extension; `.ts` and the conventional `.spellwire.ts` both work as compilation units.
 
 ## Compilation boundary
 
@@ -33,6 +33,8 @@ rt.onKeyDown(Key.Q, () => {
 ```
 
 The state survives after the handler returns. The generated `.spellwire.bin.json` manifest maps each source name to its native slot and kind.
+
+State lookup is numeric at runtime. Discarded common updates—constant store, `state++`/`--`, `state += constant`, `state ^= constant`, and `booleanState = !booleanState`—fuse to one direct slot/immediate opcode without stack traffic. More general expressions still execute as bounded native bytecode; neither path calls JavaScript or FFI.
 
 Module-scope `const` declarations are folded as compile-time constants when possible.
 
@@ -143,16 +145,22 @@ mouseUp(MouseButton.Left)
 clickMouse(MouseButton.Left)
 moveMouse(4, -2)
 wheelMouse(0, 1)
-sleepUs(75)
+sleep.us(75)
+sleep.ms(250)
+sleep.seconds(2)
+sleep.minutes(1)
+sleep.hours(1)
 keyHeld(Key.LeftShift)
 mouseHeld(MouseButton.Right)
 ```
 
-The compiler recognizes these functions by name and emits native opcodes.
+The named forms `sleepUs`, `sleepMs`, `sleepSeconds`, `sleepMinutes`, and `sleepHours` are equivalent. The compiler recognizes these calls and emits native opcodes.
 
 ## Delay behavior
 
-`sleepUs(n)` flushes the pending output batch and advances an absolute monotonic deadline. The live owned host stores the handler continuation in a fixed-capacity queue and resumes it when due, so the observer/runtime worker can accept unrelated input and control commands meanwhile. A zero-duration yield may resume in the same poll.
+Every delay helper flushes the pending output batch and advances an absolute monotonic deadline. Constant units scale at compile time; a dynamic duration stores its unit scale in the same wide `DelayUs` instruction. Each call therefore remains one delay opcode with no JavaScript conversion or additional timer. The live owned host stores the handler continuation in a fixed-capacity queue and resumes it when due, so the observer/runtime worker can accept unrelated input and control commands meanwhile. A zero-duration yield may resume in the same poll.
+
+The bytecode represents a non-negative signed 64-bit microsecond duration instead of the old unsigned 32-bit limit. Checked multiplication and checked deadline addition reject overflow; they never wrap into an earlier deadline.
 
 The low-level compatibility engine and deterministic simulator preserve synchronous waiting semantics. This keeps the small embedding ABI simple; use `NativeHost` for non-blocking live observation.
 

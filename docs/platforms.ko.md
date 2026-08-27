@@ -63,6 +63,8 @@ Windows overlay는 `target/release/spellwire-overlay.exe`입니다. Linux는 evd
 
 공개 `Key`는 USB HID keyboard-page usage입니다. 각 backend는 명시적 supported map을 사용하고 안전한 mapping이 없으면 다른 key를 조용히 보내지 않고 `unsupported USB HID key usage`를 반환합니다. Linux는 현재 export set 전체를 다룹니다. macOS/Windows는 API로 신뢰성 있게 표현할 수 없는 usage를 제외합니다. layout/media 동작은 대상 keyboard에서 확인하십시오.
 
-## Overlay 한계
+## Overlay window semantics
 
-renderer는 transparent, topmost, click-through window를 요청하며 input worker와 격리됩니다. Windows/macOS는 필요한 semantics를 제공합니다. Linux는 display server/compositor에 의존합니다. winit을 통한 universal Wayland always-on-top layer-shell contract가 없으므로 GNOME/KDE/wlroots 대상 환경마다 검증해야 합니다.
+native renderer는 `transparent`, `alwaysOnTop`, `focusable`, `clickThrough`, `decorations`, `resizable`, 초기 `visible` option을 받습니다. overlay용 안전 기본값은 transparent, topmost, non-focusable, click-through, borderless, fixed-size, visible입니다. rendering은 input worker와 격리됩니다.
+
+macOS는 `focusable`이 false이면 prohibited activation policy, true이면 accessory policy를 사용합니다. Windows는 `focusable`이 false이면 native window를 disable합니다. Linux는 display server/compositor에 의존합니다. winit을 통한 universal Wayland always-on-top layer-shell/focus contract가 없으므로 GNOME/KDE/wlroots 대상 환경마다 검증해야 합니다. primary monitor 선택과 full-monitor 시작 geometry는 현재 고정입니다.

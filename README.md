@@ -34,7 +34,7 @@ bun run build  # write dist/main.spellwire.bin and its manifest
 
 `start` and `watch` prepare platform permissions automatically before the native host starts.
 
-Generated projects also include a state-driven modern overlay in `src/app.ts`. It uses `Spellwire.start()` plus Figma-style `ui.row`/`ui.column` auto layout; edit realtime logic and UI independently without a manual update loop.
+Generated projects keep realtime handlers and the state-driven modern overlay together in `src/main.ts`. The compiler extracts only bounded handlers for the native VM; unrestricted application/overlay code stays on Bun. `Spellwire.start()` owns both lifecycles without a manual update loop.
 
 ## API at a glance
 
@@ -44,14 +44,15 @@ Generated projects also include a state-driven modern overlay in `src/app.ts`. I
 | Key remap | `rt.remap("CapsLock", "Escape")` |
 | Persistent state | module-scope `let enabled = true` |
 | Keyboard/mouse output | `tapKey`, `keyDown`, `clickMouse`, `moveMouse`, `wheelMouse` |
-| Delay | `sleepUs(microseconds)` |
+| Delay | `sleep.ms(250)`, `sleep.seconds(2)`, or unit-specific helpers |
 | Start input + watch + UI | `Spellwire.start(options)` |
 | Overlay layout | `ui.row`, `ui.column`, `ui.panel`, `ui.stack` |
 | Overlay content | `ui.text`, `ui.ellipse`, `ui.dot`, `ui.badge`, `ui.divider` |
 | State-bound UI | `overlay: state => ...`, `ui.bind`, `ui.when` |
 | UI styling | `width`, `height`, `padding`, `gap`, `fill`, `stroke`, `shadow`, `opacity`, font props |
+| Overlay window | `overlayOptions.window` (`alwaysOnTop`, `transparent`, `focusable`, `clickThrough`, …) |
 
-Use the **[one-page API reference](docs/api.md)** for signatures, defaults, option tables, a complete state-to-overlay application, and current window-policy limitations. Normal API lookup does not require moving between separate automation and overlay pages.
+Use the **[one-page API reference](docs/api.md)** for signatures, defaults, option tables, a complete state-to-overlay application, native window policy, and platform caveats. Normal API lookup does not require moving between separate automation and overlay pages.
 
 ## Stateful realtime TypeScript
 
@@ -87,7 +88,7 @@ bun run build
 The generated project writes `dist/main.spellwire.bin` plus its JSON state manifest. To compile another path directly:
 
 ```bash
-bunx spellwire compile src/main.spellwire.ts
+bunx spellwire compile src/main.ts
 ```
 
 Direct CLI output defaults next to the input source.
@@ -131,7 +132,7 @@ If this is your first live run, follow [Live Native Host Guide](docs/live-host.m
 | C ABI with explicit and owned-host lifecycle APIs | Implemented |
 | Bun FFI host, named state, watch/reload, and SPSC dynamic lane | Implemented |
 | Windows hooks/`SendInput`, macOS event tap/`CGEventPost`, Linux evdev/uinput | Implemented; macOS live-verified |
-| State-driven auto-layout overlay, modern styling, retained dirty updates | Implemented; macOS live-verified |
+| State-driven auto-layout overlay, modern styling, configurable native window policy, retained dirty updates | Implemented; macOS live-verified |
 | Cross-platform prebuilt artifact/signing workflow | Implemented; release credentials required |
 | Physical end-to-end microsecond latency claim | Not claimed |
 

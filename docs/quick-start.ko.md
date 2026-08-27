@@ -26,7 +26,7 @@ bun run build  # dist에 binary와 JSON manifest 생성
 
 `start`와 `watch`는 전역 입력 권한을 자동으로 확인하고 요청합니다. 일반 사용에 별도 권한 명령은 필요하지 않습니다.
 
-scaffold는 `src/main.spellwire.ts` realtime 로직과 `src/app.ts` 상태 기반 overlay를 분리합니다. 후자는 이미 `Spellwire.start()`와 modern auto layout을 사용합니다. 편집 전 [오버레이](overlay.ko.md)를 참고하십시오.
+scaffold는 realtime 로직과 상태 기반 overlay를 `src/main.ts` 하나에 둡니다. compiler는 realtime handler만 native bytecode로 추출하고 `Spellwire.start()`는 제한 없는 application/UI code를 Bun에 둔 채 같은 lifecycle을 관리합니다. layout과 window option은 [오버레이](overlay.ko.md)를 참고하십시오.
 
 기존 프로젝트에는 다음처럼 설치합니다.
 
@@ -103,7 +103,7 @@ import {
   keyDown,
   keyUp,
   rt,
-  sleepUs,
+  sleep,
 } from "spellwire";
 
 let combo = 0;
@@ -113,7 +113,7 @@ function tap(key: Key, count: number): void {
   for (let index = 0; index < count; index++) {
     keyDown(key);
     keyUp(key);
-    sleepUs(40);
+    sleep.us(40);
   }
 }
 

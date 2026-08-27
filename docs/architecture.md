@@ -38,7 +38,7 @@ The companion manifest maps source state names to numeric slots and kinds. It is
 
 `SPWR` has a versioned header followed by resource limits, state, handlers, and bytecode. `Program::decode` validates structural bounds; `Runtime::new` validates entries, jumps, slots, stack behavior, and budgets before any dispatch.
 
-The runtime uses a direct source × device × edge × code trigger table, fixed held-input bitmaps, fixed VM stack/locals/output storage, and a fixed-capacity continuation scheduler. A zero-delay instruction run becomes one output batch. `sleepUs()` flushes that batch and yields the handler with an absolute monotonic deadline. The owned host polls ready continuations while continuing to receive new input and control commands.
+The runtime uses a direct source × device × edge × code trigger table, fixed held-input bitmaps, fixed VM stack/locals/output storage, and a fixed-capacity continuation scheduler. Common state/immediate updates bypass stack traffic. A zero-delay instruction run becomes one output batch. Every `sleep.*()` unit helper lowers to one wide/scaled delay opcode, flushes that batch, and yields the handler with an absolute monotonic deadline. The owned host polls ready continuations while continuing to receive new input and control commands.
 
 The lower-level compatibility engine retains synchronous delay behavior for simple embedders.
 

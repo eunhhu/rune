@@ -10,7 +10,7 @@ Spellwire는 실시간 작업과 일반 TypeScript를 의도적으로 분리합�
 
 | 영역 | 실행 위치 | 적합한 작업 |
 | --- | --- | --- |
-| 실시간 handler | 제한된 네이티브 VM | 상태 갱신, 조건, 제한 반복, held 조회, 키/마우스 출력, `sleepUs()` |
+| 실시간 handler | 제한된 네이티브 VM | 상태 갱신, 조건, 제한 반복, held 조회, 키/마우스 출력, unit-based `sleep.*()` |
 | 네이티브 host | native worker와 OS backend | 전역 입력 관찰, 주입, 지연 continuation, 상태 저장 |
 | Control plane | Bun | 로드, 권한, hot reload, 로그, UI, 파일, 네트워크 |
 | Dynamic lane | 공유 ring 위의 Bun | 실시간 보장이 필요 없는 best-effort 입력 반응 |
@@ -103,7 +103,7 @@ bunx spellwire run macro.spellwire.ts
 bun packages/spellwire/src/cli.ts run macro.spellwire.ts
 ```
 
-입력을 생략하면 `src/main.spellwire.ts`를 사용합니다. 정상 startup은 다음과 비슷합니다.
+입력을 생략하면 `src/main.ts`, 없으면 legacy `src/main.spellwire.ts`를 사용합니다. 정상 startup은 다음과 비슷합니다.
 
 ```text
 running /absolute/path/to/macro.spellwire.ts (press Ctrl+C to stop)
@@ -141,7 +141,7 @@ bunx spellwire run macro.spellwire.bin --manifest configs/macro-state.json
 | `spellwire watch [source-or-binary]` | 같은 실행 경로에 직렬화된 hot reload 추가 |
 | `spellwire compile [source] [output]` | AOT binary와 상태 manifest 생성 |
 
-세 명령의 기본 입력은 `src/main.spellwire.ts`입니다. `--library <path>`는 native library 탐색을, `--manifest <path>`는 compiled input의 인접 manifest를 덮어씁니다.
+세 명령의 기본 입력은 `src/main.ts`이고 없으면 legacy `src/main.spellwire.ts`를 사용합니다. `--library <path>`는 native library 탐색을, `--manifest <path>`는 compiled input의 인접 manifest를 덮어씁니다.
 
 ## 통합 programmatic API
 

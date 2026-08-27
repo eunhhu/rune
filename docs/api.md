@@ -15,24 +15,22 @@ Only APIs that exist in the current source tree appear here. Older sketches such
 | Remap one key | `rt.remap("CapsLock", "Escape")` | [Realtime registration](#realtime-registration) |
 | Keep native state | module-scope `let enabled = true` | [Persistent realtime state](#persistent-realtime-state) |
 | Send keyboard/mouse output | `tapKey`, `clickMouse`, `moveMouse` | [Realtime output intrinsics](#realtime-output-intrinsics) |
-| Delay a handler | `sleepUs(250_000)` | [Realtime output intrinsics](#realtime-output-intrinsics) |
+| Delay a handler | `sleep.ms(250)` or `sleep.seconds(2)` | [Realtime output intrinsics](#realtime-output-intrinsics) |
 | Start input, watch, and UI together | `Spellwire.start(options)` | [Application lifecycle](#unified-application-lifecycle) |
 | Show state in an overlay | `overlay: state => ui.text(...)` | [Modern overlay](#modern-overlay) |
 | Build rows, columns, panels, and stacks | `ui.row`, `ui.column`, `ui.panel` | [UI constructors](#ui-constructors) |
 | Set size, padding, gap, fill, border, shadow, or font | element props | [Layout and visual properties](#layout-and-visual-properties) |
 | Bind only one UI subtree | `ui.bind(state, render)` | [Bindings and refresh](#bindings-and-refresh) |
 | Show, hide, or manually refresh UI | `overlay.show()`, `hide()`, `app.refreshOverlay()` | [Overlay lifecycle](#overlay-lifecycle) |
-| Configure topmost/transparency/focus | currently fixed native policy | [Window behavior](#window-behavior) |
+| Configure topmost/transparency/focus | `overlayOptions.window` | [Window behavior](#window-behavior) |
 | Control the native host directly | `NativeHost` | [Native host and permissions](#native-host-and-permissions) |
 
 ## Copyable complete application
 
-Generated projects already contain this two-file structure. Realtime code is compiled to native bytecode; `app.ts` owns permissions, hot reload, state snapshots, and native overlay lifetime.
-
-`src/main.spellwire.ts`:
+Generated projects contain one `src/main.ts`. The compiler extracts only realtime handlers into native bytecode; the same file's unrestricted application and overlay code stays on Bun. This keeps authoring unified without moving JavaScript onto the input-event path.
 
 ```ts
-import { Key, rt, tapKey } from "spellwire";
+import { Key, Spellwire, rt, tapKey, ui } from "spellwire";
 
 let enabled = true;
 let presses = 0;
@@ -47,17 +45,11 @@ rt.hotkey("F8", () => {
 }, { consume: false });
 
 rt.remap("CapsLock", "Escape", { when: () => enabled });
-```
-
-`src/app.ts`:
-
-```ts
-import { fileURLToPath } from "node:url";
-import { Spellwire, ui } from "spellwire";
 
 const app = await Spellwire.start({
-  input: fileURLToPath(new URL("./main.spellwire.ts", import.meta.url)),
+  input: import.meta.file,
   watch: Bun.argv.includes("--watch"),
+  overlayOptions: { window: { title: "Spellwire Status" } },
   overlay: (state) => {
     const enabled = state.enabled === true;
     return ui.column(
@@ -119,7 +111,7 @@ bunx spellwire watch [macro.spellwire.ts]
 bunx spellwire compile macro.spellwire.ts [output.spellwire.bin]
 ```
 
-Input defaults to `src/main.spellwire.ts`. `run` and `watch` compile in memory and prepare permissions once. `watch` adds only control-plane filesystem reload.
+Input defaults to `src/main.ts`, then falls back to legacy `src/main.spellwire.ts` when present. CLI `run` and `watch` operate the realtime native host; generated `bun run start` / `watch` execute the unified application including overlay code. Both compile realtime handlers in memory and prepare permissions once. Watch mode adds only control-plane filesystem reload.
 
 ## Package imports
 
@@ -145,6 +137,11 @@ import {
   moveMouse,
   parseHotkey,
   rt,
+  sleep,
+  sleepHours,
+  sleepMinutes,
+  sleepMs,
+  sleepSeconds,
   sleepUs,
   tapKey,
   ui,
@@ -174,7 +171,7 @@ rt.hotkey("F8", () => {
 });
 ```
 
-Assignments, compound assignments, `++`/`--`, integer arithmetic, comparisons, boolean logic, bitwise operations, conditions, and bounded loops compile to native VM opcodes. Realtime dispatch uses numeric slots, not state-name lookup, JavaScript objects, or FFI. Module-scope `const` values are folded when statically representable.
+Assignments, compound assignments, `++`/`--`, integer arithmetic, comparisons, boolean logic, bitwise operations, conditions, and bounded loops compile to native VM opcodes. Realtime dispatch uses numeric slots, not state-name lookup, JavaScript objects, or FFI. Common discarded updates such as `count++`, `count += 4`, `mask ^= 1`, `enabled = !enabled`, and constant stores compile directly to one slot/immediate opcode with no VM stack round trip. Module-scope `const` values are folded when statically representable.
 
 State survives dispatches. Source reload preserves values by matching state name and kind unless `preserveState: false` is selected. `when` accepts one module-scope boolean state or its negation because the native suppression table must evaluate the same gate before dispatch.
 
@@ -272,10 +269,14 @@ clickMouse(MouseButton.Left)
 
 moveMouse(12, -4)
 wheelMouse(0, 1)
-sleepUs(80)
+sleep.us(80)
+sleep.ms(250)
+sleep.seconds(2)
+sleep.minutes(1)
+sleep.hours(1)
 ```
 
-A zero-delay run of output intrinsics is collected into a fixed native output batch. In the live host, `sleepUs()` flushes the batch and yields into the fixed-capacity absolute-deadline scheduler. The compatibility engine/simulator wait synchronously.
+A zero-delay run of output intrinsics is collected into a fixed native output batch. In the live host, every `sleep.*()` helper flushes the batch and yields into the fixed-capacity absolute-deadline scheduler. The compatibility engine/simulator wait synchronously.
 
 | API | Native effect |
 | --- | --- |
@@ -285,9 +286,13 @@ A zero-delay run of output intrinsics is collected into a fixed native output ba
 | `clickMouse(button)` | Emit paired mouse down/up transitions |
 | `moveMouse(dx, dy)` | Emit relative pointer movement |
 | `wheelMouse(x, y)` | Emit horizontal/vertical wheel movement |
-| `sleepUs(duration)` | Flush output and yield until a monotonic deadline |
+| `sleep.us(duration)` / `sleepUs(duration)` | Microseconds |
+| `sleep.ms(duration)` / `sleepMs(duration)` | Milliseconds |
+| `sleep.seconds(duration)` / `sleepSeconds(duration)` | Seconds |
+| `sleep.minutes(duration)` / `sleepMinutes(duration)` | Minutes |
+| `sleep.hours(duration)` / `sleepHours(duration)` | Hours |
 
-Only the microsecond helper currently exists. Convert explicitly: `250 ms = sleepUs(250_000)`, `2 s = sleepUs(2_000_000)`, and `1 min = sleepUs(60_000_000)`. One delay must fit unsigned 32-bit microseconds, so its maximum is `4_294_967_295 µs` (about 71 minutes 35 seconds). There are no current `sleepMs`, `sleepSeconds`, `sleepMinutes`, or `sleepHours` exports.
+The namespace form is the shortest API; named helpers remain convenient for direct imports. Constant durations are scaled at compile time. Dynamic durations carry their unit scale in the same `DelayUs` instruction, so a helper call still costs one native delay opcode—there is no conversion callback, extra timer, or JavaScript work in the realtime path. Encoded microseconds use a non-negative signed 64-bit value; an unsupported platform deadline is rejected instead of wrapping. The JavaScript fallback additionally requires safe-integer input and output.
 
 Calling an output intrinsic directly in ordinary Bun code throws unless a fallback action sink has been installed with `withRealtimeActionSink()`.
 
@@ -475,7 +480,7 @@ Use this API for normal applications:
 
 ```ts
 const app = await Spellwire.start({
-  input: "src/main.spellwire.ts",
+  input: import.meta.file,
   watch: true,
   overlay: (state) => ui.text(String(state.count ?? 0)),
 });
@@ -487,7 +492,7 @@ await app.untilSignal();
 
 | `SpellwireStartOptions` | Default | Contract |
 | --- | --- | --- |
-| `input` | `"src/main.spellwire.ts"` | Realtime TypeScript or compiled `.bin` path |
+| `input` | `"src/main.ts"`, then legacy source | Realtime TypeScript or compiled `.bin` path |
 | `watch` | `false` | Watch input source and reload the native program |
 | `debounceMs` | host default | Filesystem reload debounce |
 | `preserveState` | `true` | Preserve compatible named state on reload |
@@ -495,7 +500,7 @@ await app.untilSignal();
 | `onReload` | — | Called after a successful watched reload |
 | `onError` | console/default propagation | Receives watch or asynchronous overlay failures |
 | `overlay(state)` | — | Build an overlay from one shallow named-state snapshot |
-| `overlayOptions` | — | Overlay polling and renderer startup options listed below |
+| `overlayOptions` | — | Overlay polling, renderer startup, and native window options listed below |
 | `nativeLibraryPath` | auto-discovered | Explicit native library override |
 | `manifestPath` | adjacent manifest | Explicit manifest for compiled binary input |
 
@@ -628,6 +633,7 @@ const overlay = await Overlay.mount(tree, {
   fps: 30,
   executablePath: "/optional/spellwire-overlay",
   readyTimeoutMs: 5_000,
+  window: { title: "Status", alwaysOnTop: true, clickThrough: true },
   onError: console.error,
 });
 
@@ -643,6 +649,7 @@ await overlay.close();
 | `fps` | `30` | Binding polls per second, `0` for manual refresh; valid range 0–240 |
 | `executablePath` | auto-discovered | Explicit native renderer path |
 | `readyTimeoutMs` | `5_000` | Renderer startup timeout |
+| `window` | overlay-safe defaults | Native window policy; see the table below |
 | `onError` | console | Asynchronous refresh error callback |
 | `renderer` | create one | Reuse an existing `NativeOverlayRenderer`; unavailable through `SpellwireStartOptions.overlayOptions` |
 
@@ -650,19 +657,41 @@ Static trees create no timer. Poll ticks coalesce while a refresh is in flight, 
 
 ### Window behavior
 
-Current window policy is fixed, not configurable through `OverlayMountOptions`:
+`OverlayMountOptions.window`, `SpellwireStartOptions.overlayOptions.window`, and low-level `NativeOverlayRenderer.start({ window })` share this policy:
 
-| Behavior | Current value |
-| --- | --- |
-| Transparent framebuffer | enabled |
-| Always on top | enabled |
-| Decorations / resize | disabled |
-| Pointer hit testing | disabled (click-through) |
-| Initial monitor and size | primary monitor, full monitor bounds |
-| Show/hide | runtime methods available |
-| Focusable / non-activating guarantee | no public option; not guaranteed uniformly across platforms |
+| `OverlayWindowOptions` | Default | Native request |
+| --- | --- | --- |
+| `title` | `"Spellwire Overlay"` | Window title, 1–256 characters |
+| `transparent` | `true` | Alpha-capable surface and transparent window |
+| `alwaysOnTop` | `true` | Always-on-top window level |
+| `focusable` | `false` | Whether the overlay may activate/accept focus |
+| `clickThrough` | `true` | Disable pointer hit testing when true |
+| `decorations` | `false` | Native title bar/border |
+| `resizable` | `false` | User resize policy |
+| `visible` | `true` | Initial visibility; `show()` / `hide()` still work |
 
-Transparency, topmost, focusability, click-through, monitor selection, position, size, taskbar presence, and decorations are not current public window options. Pointer click-through alone does not guarantee that an OS can never focus the window. Linux topmost/transparency behavior remains compositor-dependent.
+```ts
+const app = await Spellwire.start({
+  input: import.meta.file,
+  overlayOptions: {
+    window: {
+      title: "Macro status",
+      transparent: true,
+      alwaysOnTop: true,
+      focusable: false,
+      clickThrough: true,
+      decorations: false,
+      resizable: false,
+      visible: true,
+    },
+  },
+  overlay: (state) => ui.text(String(state.enabled ?? false)),
+});
+```
+
+The ready message exposes the validated, fully default-resolved request as `overlay.renderer.ready.window`. The renderer is a native winit/wgpu process—there is no WebView compatibility layer. `focusable` and `clickThrough` are deliberately separate: a focusable window may still ignore pointer hits, and a non-focusable window may receive pointer hits. macOS uses the prohibited activation policy when non-focusable and the accessory policy when focusable; Windows disables the native window when non-focusable; Linux uses the available winit/compositor hints. No cross-platform library can promise identical focus/topmost behavior across every X11/Wayland compositor, so verify the intended Linux desktop.
+
+Initial monitor and size remain the primary monitor's full bounds; monitor routing and explicit window geometry are not yet public. On Windows, `focusable: false` also makes the window non-interactive. Set `focusable: true` for an interactive decorated tool window.
 
 ### Low-level retained overlay
 

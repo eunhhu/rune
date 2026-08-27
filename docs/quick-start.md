@@ -34,7 +34,7 @@ bun run build  # write dist/main.spellwire.bin plus its JSON manifest
 
 `start` and `watch` check/request global-input permissions automatically. No separate setup command is needed for the normal path.
 
-The scaffold separates `src/main.spellwire.ts` realtime logic from the `src/app.ts` state-driven overlay. The latter already uses `Spellwire.start()` and modern auto layout; see [Overlay](overlay.md) before editing it.
+The scaffold puts realtime logic and the state-driven overlay in one `src/main.ts`. The compiler extracts only realtime handlers into native bytecode, while `Spellwire.start()` keeps unrestricted application/UI code on Bun and owns the shared lifecycle. See [Overlay](overlay.md) for layout and window options.
 
 ## Develop from source
 
@@ -105,7 +105,7 @@ import {
   keyDown,
   keyUp,
   rt,
-  sleepUs,
+  sleep,
 } from "spellwire";
 
 let combo = 0;
@@ -115,7 +115,7 @@ function tap(key: Key, count: number): void {
   for (let index = 0; index < count; index++) {
     keyDown(key);
     keyUp(key);
-    sleepUs(40);
+    sleep.us(40);
   }
 }
 

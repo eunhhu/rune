@@ -51,7 +51,7 @@ module에는 제한 없는 control-plane TypeScript가 존재할 수 있지만 r
 
 [실시간 TypeScript](typescript-runtime.ko.md)를 참고하십시오.
 
-## `sleepUs()`가 정확하지 않음
+## `sleep.*()` delay가 정확하지 않음
 
 live host는 absolute deadline과 non-blocking continuation을 사용하지만 desktop OS는 hard realtime scheduler가 아닙니다. compatibility engine/simulator는 delay를 동기 실행하므로 긴 wait에서 멈춘 것처럼 보일 수 있습니다.
 

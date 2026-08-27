@@ -110,16 +110,17 @@ p50, p95, p99, p999, max nanosecond를 출력합니다. macOS에서는 `CGEventP
 
 ```bash
 target/release/spellwire-overlay --smoke
+target/release/spellwire-overlay --window-config '{"title":"Window policy smoke","transparent":false,"alwaysOnTop":false,"focusable":true,"clickThrough":false,"decorations":true,"resizable":true,"visible":false}' --smoke
 bun run test:overlay-live
 ```
 
 약 350ms 뒤 종료하며 다음 형태의 한 줄을 출력합니다.
 
 ```json
-{"event":"ready","width":3420,"height":2214,"alphaMode":"PostMultiplied"}
+{"event":"ready","width":3420,"height":2214,"scaleFactor":2,"alphaMode":"PostMultiplied","window":{"title":"Spellwire Overlay","transparent":true,"alwaysOnTop":true,"focusable":false,"clickThrough":true,"decorations":false,"resizable":false,"visible":true}}
 ```
 
-화면 크기와 alpha mode는 monitor/GPU에 따라 달라집니다. 양수 크기와 유효한 `alphaMode`가 중요하며 예시 값과 같을 필요는 없습니다.
+화면 크기, scale factor, alpha mode는 monitor/GPU에 따라 달라집니다. 양수 크기, 유효한 `alphaMode`, 요청 후 resolve된 정책과 같은 `window` object가 중요하며 예시 값과 같을 필요는 없습니다. configured smoke는 focus 이동을 피하려고 hidden으로 시작하면서 non-default flag를 검증합니다.
 
 ## Windows 검증
 

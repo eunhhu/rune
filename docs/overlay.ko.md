@@ -9,12 +9,26 @@ Spellwire의 modern overlay API는 native state, Figma식 auto layout, retained 
 ## 상태 + 오버레이 전체 코드
 
 ```ts
-import { fileURLToPath } from "node:url";
-import { Spellwire, ui } from "spellwire";
+import { Key, Spellwire, rt, tapKey, ui } from "spellwire";
+
+let enabled = true;
+let activations = 0;
+
+rt.hotkey("Q", () => {
+  activations++;
+  tapKey(Key.E);
+}, { when: () => enabled });
+
+rt.hotkey("F8", () => {
+  enabled = !enabled;
+}, { consume: false });
 
 const app = await Spellwire.start({
-  input: fileURLToPath(new URL("./main.spellwire.ts", import.meta.url)),
+  input: import.meta.file,
   watch: true,
+  overlayOptions: {
+    window: { title: "Spellwire Status", alwaysOnTop: true, clickThrough: true },
+  },
   overlay: (state) => {
     const enabled = state.enabled === true;
     return ui.column(
@@ -47,7 +61,7 @@ const app = await Spellwire.start({
 await app.untilSignal();
 ```
 
-`Spellwire.start()`가 native host, 권한 요청, 선택적 source watcher, overlay process, state binding, 종료를 모두 소유합니다. `untilSignal()`은 `SIGINT`/`SIGTERM`을 처리하고 renderer 종료, host 정지, 눌린 합성 입력 해제까지 수행합니다.
+`Spellwire.start()`가 native host, 권한 요청, 선택적 source watcher, overlay process, state binding, 종료를 모두 소유합니다. compiler는 같은 파일을 읽되 `rt.*` handler만 native 실행용으로 추출하며 overlay code는 제한 없는 Bun TypeScript로 남습니다. `untilSignal()`은 `SIGINT`/`SIGTERM`을 처리하고 renderer 종료, host 정지, 눌린 합성 입력 해제까지 수행합니다.
 
 실행 가능한 저장소 예제는 [`examples/state-overlay.ts`](../examples/state-overlay.ts)입니다.
 
@@ -73,6 +87,12 @@ const app = await Spellwire.start({
 
 await app.refreshOverlay();
 ```
+
+## Reactivity model
+
+root `overlay(state)` callback은 React식 render/reconcile입니다. named state 전체를 한 번 bulk snapshot하고 shallow compare하며 slot 하나라도 바뀌면 root callback을 다시 실행합니다. 자동 signal dependency tracking은 아닙니다. retained layer는 fine-grained입니다. keyed primitive를 개별 비교하고 unchanged node는 IPC를 만들지 않으며 renderer는 영향 영역만 다시 그립니다.
+
+callback 단위 fine granularity가 필요하면 `ui.bind(host.states.enabled, render)`처럼 좁은 readable source를 사용하십시오. 바뀐 binding callback만 다시 실행합니다. 이 명시적 분리는 realtime input path에서 proxy, dependency tracking, allocation, JavaScript 작업을 없앱니다.
 
 ## UI API 목록
 
@@ -148,6 +168,29 @@ text:
 
 color는 `#RRGGBB` 또는 `#RRGGBBAA`입니다. parent opacity는 descendant에 곱해집니다. 중요한 상태는 color만으로 표현하지 말고 text나 shape 변화도 함께 사용하십시오.
 
+## Native window option
+
+`overlayOptions.window`에서 native window 동작을 설정합니다. `Overlay.mount(..., { window })`와 `NativeOverlayRenderer.start({ window })`도 같은 option을 받습니다.
+
+```ts
+overlayOptions: {
+  window: {
+    title: "Macro status",
+    transparent: true,
+    alwaysOnTop: true,
+    focusable: false,
+    clickThrough: true,
+    decorations: false,
+    resizable: false,
+    visible: true,
+  },
+},
+```
+
+title을 제외하면 위 값이 기본값입니다. `clickThrough`는 pointer hit test, `focusable`은 activation/focus를 별도로 제어합니다. `visible: false`이면 `show()` 전까지 hidden으로 생성합니다. validate된 값은 `app.overlay?.renderer.ready.window`에서 확인할 수 있습니다.
+
+DOM, WebView, compatibility UI가 아니라 native winit/wgpu window와 surface입니다. macOS는 non-focusable일 때 prohibited activation policy, focusable일 때 accessory policy를 사용하고 Windows는 non-focusable window disable을 사용하며 Linux는 winit이 제공하는 hint를 적용합니다. X11/Wayland compositor 규칙이 다를 수 있어 Linux는 대상 desktop 검증이 필요합니다. 시작 geometry는 아직 primary monitor 전체 영역이고 public multi-monitor routing은 미구현입니다.
+
 ## `Spellwire.start()` 없이 직접 binding
 
 `ui.bind`는 단일 `NativeState`, `NativeHost` snapshot source, getter, `get()`/`snapshotStates()` 구현 object를 받습니다.
@@ -165,7 +208,7 @@ const overlay = await Overlay.mount(
 
 같은 source의 여러 binding은 reconciliation pass당 한 번만 읽습니다. 여러 state를 표시할 때는 host 전체를 한 번 bind하는 편이 좋습니다. state마다 FFI를 호출하지 않고 native bulk snapshot 한 번을 사용합니다.
 
-`OverlayMountOptions.fps`는 0–240이며 0은 manual refresh입니다. `executablePath`와 `readyTimeoutMs`는 native startup을 제어하고 `onError`는 asynchronous refresh failure를 처리합니다.
+`OverlayMountOptions.fps`는 0–240이며 0은 manual refresh입니다. `executablePath`, `readyTimeoutMs`, `window`는 native startup을 제어하고 `onError`는 asynchronous refresh failure를 처리합니다.
 
 ## Low-level retained escape hatch
 
@@ -196,7 +239,7 @@ bun run bench:overlay
 
 ## 현재 경계
 
-- overlay는 click-through이며 interactive control은 지원하지 않습니다.
+- overlay용 안전 기본값은 non-focusable + click-through이며 둘 다 설정할 수 있습니다. interactive control/widget은 아직 제공하지 않습니다.
 - system/monospace font family를 지원합니다. 임의 font file loading은 아직 public API가 아닙니다.
 - primary monitor를 사용합니다. multi-monitor routing은 아직 public API가 아닙니다.
 - image, arbitrary vector path, clipping, animation은 아직 public API가 아닙니다.
@@ -210,4 +253,4 @@ target/release/spellwire-overlay --smoke
 bun run test:overlay-live
 ```
 
-executable smoke는 physical surface dimension, monitor scale factor, alpha mode를 포함한 `ready` JSON을 출력합니다. live smoke는 실제 host 시작, named state write, bulk snapshot, retained text node 두 개 update, clean shutdown까지 추가로 검증합니다.
+executable smoke는 physical surface dimension, monitor scale factor, alpha mode, resolved window 정책을 포함한 `ready` JSON을 출력합니다. live smoke는 실제 host 시작, configured/default window option, named state write, bulk snapshot, retained text node 두 개 update, clean shutdown까지 추가로 검증합니다.
