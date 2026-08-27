@@ -20,6 +20,7 @@
     "check": "bun run typecheck && bun run test:ts && bun run test:docs && cargo fmt --all -- --check && cargo test --workspace --locked && cargo clippy --workspace --all-targets --locked -- -D warnings",
     "compile:example": "bun packages/spellwire/src/cli.ts compile examples/stateful.spellwire.ts",
     "inspect:example": "cargo run -q -p spellwire-cli --locked -- inspect examples/stateful.spellwire.bin",
+    "inspect:runtime": "bun scripts/runtime-info.ts",
     "simulate:example": "bun run compile:example && cargo run -q -p spellwire-cli --locked -- simulate examples/stateful.spellwire.bin key-down:Q key-up:Q key-down:Q key-up:Q key-down:Q key-up:Q",
     "bench": "cargo run -p spellwire-bench --release --locked --",
     "bench:platform": "cargo run -p spellwire-native --bin platform-bench --release --locked --",
