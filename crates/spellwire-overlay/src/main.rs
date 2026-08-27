@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    fs,
+    env, fs,
     io::{self, BufRead},
     sync::Arc,
     thread,
@@ -9,11 +9,13 @@ use std::{
 
 use bytemuck::{Pod, Zeroable};
 use fontdue::{Font, FontSettings};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tiny_skia::{FillRule, Paint, Path, PathBuilder, PixmapMut, Rect, Stroke, Transform};
 use wgpu::util::DeviceExt;
 #[cfg(target_os = "macos")]
-use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS, WindowBuilderExtMacOS};
+#[cfg(target_os = "windows")]
+use winit::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     event::{Event, WindowEvent},
@@ -65,6 +67,87 @@ enum Command {
     Show,
     Hide,
     Exit,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)] // Mirrors the ergonomic public JSON toggle schema.
+struct WindowOptions {
+    title: String,
+    transparent: bool,
+    always_on_top: bool,
+    focusable: bool,
+    click_through: bool,
+    decorations: bool,
+    resizable: bool,
+    visible: bool,
+}
+
+impl Default for WindowOptions {
+    fn default() -> Self {
+        Self {
+            title: "Spellwire Overlay".into(),
+            transparent: true,
+            always_on_top: true,
+            focusable: false,
+            click_through: true,
+            decorations: false,
+            resizable: false,
+            visible: true,
+        }
+    }
+}
+
+impl WindowOptions {
+    fn validate(self) -> Result<Self, String> {
+        let length = self.title.chars().count();
+        if self.title.trim().is_empty() || length > 256 {
+            return Err("overlay window title must contain 1 to 256 characters".into());
+        }
+        Ok(self)
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct RuntimeOptions {
+    window: WindowOptions,
+    smoke: bool,
+}
+
+fn parse_runtime_options(
+    arguments: impl IntoIterator<Item = String>,
+) -> Result<RuntimeOptions, String> {
+    let mut result = RuntimeOptions::default();
+    let mut arguments = arguments.into_iter();
+    let mut configured = false;
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--smoke" => result.smoke = true,
+            "--window-config" if !configured => {
+                let value = arguments
+                    .next()
+                    .ok_or_else(|| "--window-config requires one JSON value".to_owned())?;
+                result.window = serde_json::from_str::<WindowOptions>(&value)
+                    .map_err(|error| format!("invalid --window-config: {error}"))?
+                    .validate()?;
+                configured = true;
+            }
+            "--window-config" => return Err("--window-config may be supplied only once".into()),
+            _ => return Err(format!("unsupported overlay argument {argument:?}")),
+        }
+    }
+    Ok(result)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadyMessage<'a> {
+    event: &'static str,
+    width: u32,
+    height: u32,
+    scale_factor: f64,
+    alpha_mode: String,
+    window: &'a WindowOptions,
 }
 
 #[derive(Debug, Deserialize)]
@@ -432,7 +515,11 @@ impl Renderer {
     // GPU surface and pipeline setup is intentionally kept in one fallible constructor so a
     // partially initialized renderer can never escape.
     #[allow(clippy::too_many_lines)]
-    fn new(window: Arc<Window>, size: PhysicalSize<u32>) -> Result<Self, String> {
+    fn new(
+        window: Arc<Window>,
+        size: PhysicalSize<u32>,
+        transparent: bool,
+    ) -> Result<Self, String> {
         let instance = wgpu::Instance::default();
         let surface = instance.create_surface(window).map_err(|error| error.to_string())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -459,20 +546,28 @@ impl Renderer {
             .find(wgpu::TextureFormat::is_srgb)
             .or_else(|| capabilities.formats.first().copied())
             .ok_or_else(|| "overlay surface exposes no texture format".to_owned())?;
-        let alpha_mode = capabilities
-            .alpha_modes
-            .iter()
-            .copied()
-            .find(|mode| *mode == wgpu::CompositeAlphaMode::PreMultiplied)
-            .or_else(|| {
-                capabilities
-                    .alpha_modes
-                    .iter()
-                    .copied()
-                    .find(|mode| *mode == wgpu::CompositeAlphaMode::PostMultiplied)
-            })
-            .or_else(|| capabilities.alpha_modes.first().copied())
-            .ok_or_else(|| "overlay surface exposes no alpha mode".to_owned())?;
+        let alpha_mode = (if transparent {
+            capabilities
+                .alpha_modes
+                .iter()
+                .copied()
+                .find(|mode| *mode == wgpu::CompositeAlphaMode::PreMultiplied)
+                .or_else(|| {
+                    capabilities
+                        .alpha_modes
+                        .iter()
+                        .copied()
+                        .find(|mode| *mode == wgpu::CompositeAlphaMode::PostMultiplied)
+                })
+        } else {
+            capabilities
+                .alpha_modes
+                .iter()
+                .copied()
+                .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
+        })
+        .or_else(|| capabilities.alpha_modes.first().copied())
+        .ok_or_else(|| "overlay surface exposes no alpha mode".to_owned())?;
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -1074,12 +1169,18 @@ fn reader_thread(proxy: &EventLoopProxy<Command>) {
 
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime_options = parse_runtime_options(env::args().skip(1)).map_err(io::Error::other)?;
+    let window_options = &runtime_options.window;
     let mut event_loop_builder = EventLoopBuilder::<Command>::with_user_event();
     #[cfg(target_os = "macos")]
     event_loop_builder
-        .with_activation_policy(ActivationPolicy::Accessory)
+        .with_activation_policy(if window_options.focusable {
+            ActivationPolicy::Accessory
+        } else {
+            ActivationPolicy::Prohibited
+        })
         .with_default_menu(false)
-        .with_activate_ignoring_other_apps(false);
+        .with_activate_ignoring_other_apps(window_options.focusable);
     let event_loop = event_loop_builder.build()?;
     let monitor = event_loop.primary_monitor();
     let size =
@@ -1087,39 +1188,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let position = monitor
         .as_ref()
         .map_or(PhysicalPosition::new(0, 0), winit::monitor::MonitorHandle::position);
-    let window = Arc::new(
-        WindowBuilder::new()
-            .with_title("Spellwire Overlay")
-            .with_inner_size(size)
-            .with_position(position)
-            .with_decorations(false)
-            .with_resizable(false)
-            .with_transparent(true)
-            .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_visible(false)
-            .build(&event_loop)?,
-    );
-    window.set_cursor_hittest(false)?;
-    let mut renderer = Renderer::new(Arc::clone(&window), size).map_err(io::Error::other)?;
+    let window_builder = WindowBuilder::new()
+        .with_title(&window_options.title)
+        .with_inner_size(size)
+        .with_position(position)
+        .with_decorations(window_options.decorations)
+        .with_resizable(window_options.resizable)
+        .with_transparent(window_options.transparent)
+        .with_window_level(if window_options.always_on_top {
+            WindowLevel::AlwaysOnTop
+        } else {
+            WindowLevel::Normal
+        })
+        .with_active(window_options.focusable)
+        .with_visible(false);
+    #[cfg(target_os = "macos")]
+    let window_builder = window_builder
+        .with_accepts_first_mouse(window_options.focusable && !window_options.click_through);
+    #[cfg(target_os = "windows")]
+    let window_builder = window_builder.with_skip_taskbar(!window_options.focusable);
+    let window = Arc::new(window_builder.build(&event_loop)?);
+    #[cfg(target_os = "windows")]
+    if !window_options.focusable {
+        window.set_enable(false);
+    }
+    window.set_cursor_hittest(!window_options.click_through)?;
+    let window_size = window.inner_size();
+    let mut renderer = Renderer::new(Arc::clone(&window), window_size, window_options.transparent)
+        .map_err(io::Error::other)?;
     let mut nodes: BTreeMap<u32, OverlayNode> = BTreeMap::new();
     let proxy = event_loop.create_proxy();
     thread::Builder::new()
         .name("spellwire-overlay-control".into())
         .spawn(move || reader_thread(&proxy))?;
-    if std::env::args().any(|argument| argument == "--smoke") {
+    if runtime_options.smoke {
         let proxy = event_loop.create_proxy();
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(350));
             let _ = proxy.send_event(Command::Exit);
         });
     }
-    window.set_visible(true);
+    window.set_visible(window_options.visible);
     println!(
-        "{{\"event\":\"ready\",\"width\":{},\"height\":{},\"scaleFactor\":{},\"alphaMode\":\"{:?}\"}}",
-        size.width,
-        size.height,
-        window.scale_factor(),
-        renderer.config.alpha_mode
+        "{}",
+        serde_json::to_string(&ReadyMessage {
+            event: "ready",
+            width: window_size.width,
+            height: window_size.height,
+            scale_factor: window.scale_factor(),
+            alpha_mode: format!("{:?}", renderer.config.alpha_mode),
+            window: window_options,
+        })?
     );
     let window_id = window.id();
     let mut dirty = Some(renderer.full_bounds());
@@ -1220,6 +1339,38 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(command, Command::Batch { mutations } if mutations.len() == 1));
+    }
+
+    #[test]
+    fn parses_window_configuration_and_preserves_safe_defaults() {
+        let defaults = parse_runtime_options(Vec::<String>::new()).unwrap();
+        assert_eq!(defaults, RuntimeOptions::default());
+        assert!(defaults.window.transparent);
+        assert!(defaults.window.always_on_top);
+        assert!(!defaults.window.focusable);
+        assert!(defaults.window.click_through);
+
+        let configured = parse_runtime_options([
+            "--window-config".to_owned(),
+            r#"{"title":"Status","transparent":false,"alwaysOnTop":false,"focusable":true,"clickThrough":false,"decorations":true,"resizable":true,"visible":false}"#.to_owned(),
+            "--smoke".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(configured.window.title, "Status");
+        assert!(!configured.window.transparent);
+        assert!(!configured.window.always_on_top);
+        assert!(configured.window.focusable);
+        assert!(!configured.window.click_through);
+        assert!(configured.window.decorations);
+        assert!(configured.window.resizable);
+        assert!(!configured.window.visible);
+        assert!(configured.smoke);
+
+        assert!(parse_runtime_options([
+            "--window-config".to_owned(),
+            r#"{"title":"   "}"#.to_owned(),
+        ])
+        .is_err());
     }
 
     #[test]

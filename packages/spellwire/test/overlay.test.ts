@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { OverlayScene } from "../src/overlay";
+import { OverlayScene, resolveOverlayWindowOptions } from "../src/overlay";
 import { OverlayView, ui } from "../src/overlay-ui";
 
 describe("OverlayScene", () => {
@@ -83,5 +83,33 @@ describe("OverlayScene", () => {
     expect(view.refresh()).toBe(1);
     expect(view.scene.drainMutations()[0]?.node).toMatchObject({ text: "Enabled" });
     expect(reads).toBe(3);
+  });
+});
+
+describe("overlay window options", () => {
+  test("resolves non-activating overlay defaults and validates overrides", () => {
+    expect(resolveOverlayWindowOptions()).toEqual({
+      title: "Spellwire Overlay",
+      transparent: true,
+      alwaysOnTop: true,
+      focusable: false,
+      clickThrough: true,
+      decorations: false,
+      resizable: false,
+      visible: true,
+    });
+    expect(resolveOverlayWindowOptions({
+      title: "Status",
+      transparent: false,
+      alwaysOnTop: false,
+      focusable: true,
+      clickThrough: false,
+      decorations: true,
+      resizable: true,
+      visible: false,
+    })).toMatchObject({ title: "Status", transparent: false, focusable: true });
+    expect(() => resolveOverlayWindowOptions({ title: "" })).toThrow(RangeError);
+    expect(() => resolveOverlayWindowOptions({ title: "   " })).toThrow(RangeError);
+    expect(() => resolveOverlayWindowOptions({ focusable: "yes" as never })).toThrow(TypeError);
   });
 });

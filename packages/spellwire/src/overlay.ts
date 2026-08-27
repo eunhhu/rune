@@ -140,6 +140,29 @@ export class OverlayScene {
 export interface NativeOverlayOptions {
   readonly executablePath?: string;
   readonly readyTimeoutMs?: number;
+  readonly window?: OverlayWindowOptions;
+}
+
+export interface OverlayWindowOptions {
+  readonly title?: string;
+  readonly transparent?: boolean;
+  readonly alwaysOnTop?: boolean;
+  readonly focusable?: boolean;
+  readonly clickThrough?: boolean;
+  readonly decorations?: boolean;
+  readonly resizable?: boolean;
+  readonly visible?: boolean;
+}
+
+export interface ResolvedOverlayWindowOptions {
+  readonly title: string;
+  readonly transparent: boolean;
+  readonly alwaysOnTop: boolean;
+  readonly focusable: boolean;
+  readonly clickThrough: boolean;
+  readonly decorations: boolean;
+  readonly resizable: boolean;
+  readonly visible: boolean;
 }
 
 export interface NativeOverlayReady {
@@ -148,6 +171,7 @@ export interface NativeOverlayReady {
   readonly height: number;
   readonly scaleFactor: number;
   readonly alphaMode: string;
+  readonly window: ResolvedOverlayWindowOptions;
 }
 
 type OverlayCommand =
@@ -185,8 +209,8 @@ export function resolveOverlayExecutable(explicitPath?: string): string {
   );
 }
 
-function spawnOverlay(executablePath: string) {
-  return Bun.spawn([executablePath], {
+function spawnOverlay(executablePath: string, window: ResolvedOverlayWindowOptions) {
+  return Bun.spawn([executablePath, "--window-config", JSON.stringify(window)], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "inherit",
@@ -217,7 +241,8 @@ export class NativeOverlayRenderer {
       throw new RangeError("readyTimeoutMs must be a positive safe integer");
     }
     const executablePath = resolveOverlayExecutable(options.executablePath);
-    const child = spawnOverlay(executablePath);
+    const window = resolveOverlayWindowOptions(options.window);
+    const child = spawnOverlay(executablePath, window);
     try {
       const ready = await readReady(child.stdout, child.exited, readyTimeoutMs);
       return new NativeOverlayRenderer(executablePath, child, ready);
@@ -283,6 +308,35 @@ export class NativeOverlayRenderer {
   }
 }
 
+export function resolveOverlayWindowOptions(
+  options: OverlayWindowOptions = {},
+): ResolvedOverlayWindowOptions {
+  const title = options.title ?? "Spellwire Overlay";
+  if (
+    typeof title !== "string" ||
+    title.trim().length === 0 ||
+    [...title].length > 256
+  ) {
+    throw new RangeError("overlay window title must contain 1 to 256 characters");
+  }
+  const resolved = {
+    title,
+    transparent: options.transparent ?? true,
+    alwaysOnTop: options.alwaysOnTop ?? true,
+    focusable: options.focusable ?? false,
+    clickThrough: options.clickThrough ?? true,
+    decorations: options.decorations ?? false,
+    resizable: options.resizable ?? false,
+    visible: options.visible ?? true,
+  } satisfies ResolvedOverlayWindowOptions;
+  for (const [name, value] of Object.entries(resolved)) {
+    if (name !== "title" && typeof value !== "boolean") {
+      throw new TypeError(`overlay window ${name} must be boolean`);
+    }
+  }
+  return Object.freeze(resolved);
+}
+
 async function readReady(
   stream: ReadableStream<Uint8Array>,
   exited: Promise<number>,
@@ -330,8 +384,22 @@ function isReady(value: unknown): value is NativeOverlayReady {
     typeof record.height === "number" &&
     typeof record.scaleFactor === "number" &&
     record.scaleFactor > 0 &&
-    typeof record.alphaMode === "string"
+    typeof record.alphaMode === "string" &&
+    isResolvedOverlayWindowOptions(record.window)
   );
+}
+
+function isResolvedOverlayWindowOptions(value: unknown): value is ResolvedOverlayWindowOptions {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.title === "string" &&
+    typeof record.transparent === "boolean" &&
+    typeof record.alwaysOnTop === "boolean" &&
+    typeof record.focusable === "boolean" &&
+    typeof record.clickThrough === "boolean" &&
+    typeof record.decorations === "boolean" &&
+    typeof record.resizable === "boolean" &&
+    typeof record.visible === "boolean";
 }
 
 function scaleNode(node: OverlayNode, scale: number): OverlayNode {

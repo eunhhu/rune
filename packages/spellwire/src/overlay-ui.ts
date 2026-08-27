@@ -770,6 +770,7 @@ export class Overlay {
     const renderer = options.renderer ?? await NativeOverlayRenderer.start({
       ...(options.executablePath === undefined ? {} : { executablePath: options.executablePath }),
       ...(options.readyTimeoutMs === undefined ? {} : { readyTimeoutMs: options.readyTimeoutMs }),
+      ...(options.window === undefined ? {} : { window: options.window }),
     });
     const view = new OverlayView(root);
     const overlay = new Overlay(renderer, view, fps, options.onError);

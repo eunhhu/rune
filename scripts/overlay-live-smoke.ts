@@ -3,7 +3,10 @@ import { Spellwire, ui } from "../packages/spellwire/src/index";
 
 const app = await Spellwire.start({
   input: fileURLToPath(new URL("../examples/stateful.spellwire.ts", import.meta.url)),
-  overlayOptions: { fps: 0 },
+  overlayOptions: {
+    fps: 0,
+    window: { title: "Spellwire Overlay Smoke" },
+  },
   overlay: (state) =>
     ui.column(
       { x: 24, y: 48, width: 240, padding: 12, gap: 8, fill: "#111827ee", radius: 12 },
@@ -13,6 +16,19 @@ const app = await Spellwire.start({
 });
 
 try {
+  const window = app.overlay?.renderer.ready.window;
+  if (
+    window?.title !== "Spellwire Overlay Smoke" ||
+    !window.transparent ||
+    !window.alwaysOnTop ||
+    window.focusable ||
+    !window.clickThrough ||
+    window.decorations ||
+    window.resizable ||
+    !window.visible
+  ) {
+    throw new Error(`unexpected overlay window policy: ${JSON.stringify(window)}`);
+  }
   const initialState = app.host.snapshotStates();
   if (app.host.snapshotStates() !== initialState) {
     throw new Error("unchanged native state snapshot was not reused");
@@ -30,6 +46,7 @@ try {
     platform: process.platform,
     arch: process.arch,
     scaleFactor: app.overlay?.renderer.ready.scaleFactor,
+    window,
     state,
     applied,
     snapshotReuse,

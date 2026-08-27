@@ -43,6 +43,7 @@ export {
   NativeOverlayRenderer,
   OverlayScene,
   overlayExecutableFileName,
+  resolveOverlayWindowOptions,
   resolveOverlayExecutable,
 } from "./overlay";
 export type {
@@ -54,6 +55,8 @@ export type {
   OverlayMutation,
   OverlayNode,
   OverlayNodeId,
+  OverlayWindowOptions,
+  ResolvedOverlayWindowOptions,
   OverlayRect,
   OverlayShadow,
   OverlayStroke,
