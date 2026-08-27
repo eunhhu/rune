@@ -25,16 +25,19 @@ export class Spellwire {
   readonly overlay: Overlay | undefined;
 
   readonly #watcher: NativeHostWatcher | undefined;
+  readonly #releaseOverlayState: (() => void) | undefined;
   #closed = false;
 
   private constructor(
     host: NativeHost,
     overlay: Overlay | undefined,
     watcher: NativeHostWatcher | undefined,
+    releaseOverlayState: (() => void) | undefined,
   ) {
     this.host = host;
     this.overlay = overlay;
     this.#watcher = watcher;
+    this.#releaseOverlayState = releaseOverlayState;
   }
 
   static async start(options: SpellwireStartOptions = {}): Promise<Spellwire> {
@@ -43,19 +46,35 @@ export class Spellwire {
         ? {}
         : { nativeLibraryPath: options.nativeLibraryPath }),
       ...(options.manifestPath === undefined ? {} : { manifestPath: options.manifestPath }),
+      ...(options.eventCapacity === undefined ? {} : { eventCapacity: options.eventCapacity }),
+      ...(options.eventPollIntervalMs === undefined
+        ? {}
+        : { eventPollIntervalMs: options.eventPollIntervalMs }),
     });
     let overlay: Overlay | undefined;
     let watcher: NativeHostWatcher | undefined;
+    let releaseOverlayState: (() => void) | undefined;
     try {
       if (options.requestPermissions ?? true) preparePermissions(host);
       host.start();
       if (options.overlay) {
+        const eventDriven = options.overlayOptions?.fps === undefined;
         overlay = await Overlay.mount(ui.bind(host, options.overlay), {
           ...options.overlayOptions,
+          ...(eventDriven ? { fps: 0 } : {}),
           ...(options.overlayOptions?.onError === undefined && options.onError !== undefined
             ? { onError: options.onError }
             : {}),
         });
+        if (eventDriven) {
+          releaseOverlayState = host.onStateChange(() => {
+            void overlay?.refresh().catch((error: unknown) => {
+              (options.onError ?? options.overlayOptions?.onError)?.(
+                error instanceof Error ? error : new Error(String(error)),
+              );
+            });
+          });
+        }
       }
       if (options.watch) {
         watcher = host.watch({
@@ -67,9 +86,10 @@ export class Spellwire {
           ...(options.onError === undefined ? {} : { onError: options.onError }),
         });
       }
-      return new Spellwire(host, overlay, watcher);
+      return new Spellwire(host, overlay, watcher, releaseOverlayState);
     } catch (error) {
       watcher?.close();
+      releaseOverlayState?.();
       await overlay?.close().catch(() => undefined);
       host.close();
       throw error;
@@ -91,6 +111,7 @@ export class Spellwire {
     if (this.#closed) return;
     this.#closed = true;
     this.#watcher?.close();
+    this.#releaseOverlayState?.();
     try {
       await this.overlay?.close();
     } finally {

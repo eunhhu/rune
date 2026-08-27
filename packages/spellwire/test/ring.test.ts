@@ -22,6 +22,15 @@ describe("SpscInt32Ring", () => {
     expect(ring.dropped).toBe(1);
   });
 
+  test("clears queued records without copying them", () => {
+    const ring = new SpscInt32Ring(4, 1);
+    ring.push([1]);
+    ring.push([2]);
+    expect(ring.clear()).toBe(2);
+    expect(ring.size).toBe(0);
+    expect(ring.clear()).toBe(0);
+  });
+
   test("keeps full detection correct when u32 counters wrap", () => {
     const ring = new SpscInt32Ring(2, 1);
     Atomics.store(ring.header, 0, 0);

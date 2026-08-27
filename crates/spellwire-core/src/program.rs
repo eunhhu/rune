@@ -37,6 +37,7 @@ pub enum ProgramError {
     InvalidJump { instruction: usize, target: u32 },
     InvalidStateSlot { instruction: usize, slot: u16 },
     InvalidLocalSlot { instruction: usize, slot: u16 },
+    InvalidEffectArity { instruction: usize, arity: u32 },
     StackLimitTooLarge(u16),
     LocalCountTooLarge(u16),
     ZeroInstructionBudget,
@@ -61,6 +62,9 @@ impl fmt::Display for ProgramError {
             }
             Self::InvalidLocalSlot { instruction, slot } => {
                 write!(f, "instruction {instruction} uses invalid local slot {slot}")
+            }
+            Self::InvalidEffectArity { instruction, arity } => {
+                write!(f, "instruction {instruction} uses invalid effect arity {arity}")
             }
             Self::StackLimitTooLarge(limit) => write!(f, "stack limit {limit} exceeds runtime cap"),
             Self::LocalCountTooLarge(count) => write!(f, "local count {count} exceeds runtime cap"),

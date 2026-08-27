@@ -37,6 +37,7 @@ pub enum Capability {
     HostLifecycle = 1 << 4,
     NonBlockingDelay = 1 << 5,
     NativeInputSuppression = 1 << 6,
+    NativeEventLane = 1 << 7,
 }
 
 pub const PERMISSION_OBSERVE: u32 = 1 << 0;
@@ -457,7 +458,8 @@ pub const fn current_capabilities() -> u32 {
         | Capability::NativeObservation as u32
         | Capability::NativeInjection as u32
         | Capability::HostLifecycle as u32
-        | Capability::NonBlockingDelay as u32;
+        | Capability::NonBlockingDelay as u32
+        | Capability::NativeEventLane as u32;
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         capabilities | Capability::NativeInputSuppression as u32

@@ -1,4 +1,4 @@
-export const WIRE_VERSION = 4;
+export const WIRE_VERSION = 5;
 export const WIRE_HEADER_SIZE = 24;
 export const WIRE_HANDLER_SIZE = 16;
 export const WIRE_INSTRUCTION_SIZE = 16;
@@ -48,6 +48,7 @@ export enum Opcode {
   AddStateImm = 40,
   XorStateImm = 41,
   ToggleState = 42,
+  EmitEffect = 43,
 }
 
 export enum InputDevice {
@@ -99,8 +100,22 @@ export interface StateSlot {
   initial: bigint;
 }
 
+export type EffectValueKind = "number" | "boolean";
+
+export interface EffectField {
+  name: string;
+  kind: EffectValueKind;
+}
+
+export interface EffectSlot {
+  name: string;
+  id: number;
+  fields: EffectField[];
+}
+
 export interface CompiledModule {
   states: StateSlot[];
+  effects: EffectSlot[];
   handlers: Handler[];
   code: Instruction[];
   localCount: number;

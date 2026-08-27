@@ -4,6 +4,7 @@ export { Spellwire } from "./app";
 export type { SpellwireStartOptions } from "./app";
 export {
   clickMouse,
+  effect,
   getFallbackRealtimeRegistrations,
   keyDown,
   keyHeld,
@@ -25,6 +26,10 @@ export {
 } from "./realtime";
 export type {
   HotkeyOptions,
+  EffectPayload,
+  EffectSchema,
+  EffectValueKind,
+  RealtimeEffect,
   RemapOptions,
   RealtimeActionSink,
   RealtimeOptions,
@@ -37,8 +42,12 @@ export {
   InputDevice,
   InputEdge,
   NativeState,
+  RuntimeEventKind,
+  RuntimeEventLane,
+  RUNTIME_EVENT_WORDS,
+  readRuntimeEventI64,
 } from "./runtime";
-export type { InputEvent, InputHandler, NativeStateBridge } from "./runtime";
+export type { InputEvent, InputHandler, NativeStateBridge, RawEffectHandler, StateChangeHandler } from "./runtime";
 export {
   NativeOverlayRenderer,
   OverlayScene,
@@ -84,6 +93,7 @@ export type {
 } from "./overlay-ui";
 export {
   NativeCapability,
+  NativeEffects,
   NativeHost,
   NativePermission,
   NATIVE_ABI_VERSION,
@@ -94,6 +104,11 @@ export {
 } from "./native";
 export type {
   NativeHostOptions,
+  NativeEffectField,
+  NativeEffectHandler,
+  NativeEffectManifestEntry,
+  NativeEffectPayload,
+  NativeRawEffectHandler,
   NativeHostWatcher,
   NativeManifest,
   ProgramDescriptor,

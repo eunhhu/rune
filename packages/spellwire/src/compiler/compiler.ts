@@ -10,6 +10,7 @@ import {
   TriggerFlag,
   instruction,
   type CompiledModule,
+  type EffectSlot,
   type Handler,
   type Instruction,
   type StateSlot,
@@ -53,6 +54,7 @@ const MAX_TRIGGER_MOUSE_BUTTON = 7;
 const FLAG_WIDE_DELAY = 1 << 6;
 const FLAG_STACK_OPERANDS = 1 << 7;
 const MAX_I64 = (1n << 63n) - 1n;
+const MAX_EFFECT_VALUES = 8;
 
 const DELAY_SCALE = {
   "sleep.us": 1n,
@@ -97,6 +99,8 @@ class Scope {
 class Compiler {
   readonly sourceFile: ts.SourceFile;
   readonly states: StateSlot[] = [];
+  readonly effects: EffectSlot[] = [];
+  readonly effectBindings = new Map<string, EffectSlot>();
   readonly stateBindings = new Map<string, Binding>();
   readonly constants = new Map<string, ts.Expression>();
   readonly functions = new Map<string, FunctionDeclarationWithBody>();
@@ -130,6 +134,7 @@ class Compiler {
       sourceFile: this.sourceFile,
       module: {
         states: this.states,
+        effects: this.effects,
         handlers: this.handlers,
         code: this.code,
         localCount: this.#maxLocal,
@@ -147,6 +152,12 @@ class Compiler {
           if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
           const name = declaration.name.text;
           if (isConst) {
+            const effect = this.parseEffectDeclaration(name, declaration.initializer);
+            if (effect) {
+              this.effects.push(effect);
+              this.effectBindings.set(name, effect);
+              continue;
+            }
             this.constants.set(name, declaration.initializer);
             continue;
           }
@@ -174,6 +185,60 @@ class Compiler {
         this.functions.set(statement.name.text, statement as FunctionDeclarationWithBody);
       }
     }
+  }
+
+  parseEffectDeclaration(bindingName: string, initializer: ts.Expression): EffectSlot | undefined {
+    const target = unwrapRealtimeExpression(initializer);
+    if (
+      !ts.isCallExpression(target) ||
+      !ts.isIdentifier(target.expression) ||
+      target.expression.text !== "effect"
+    ) {
+      return undefined;
+    }
+    if (target.arguments.length !== 2) {
+      this.fail(target, "effect requires a channel name and an object schema");
+    }
+    const nameNode = target.arguments[0];
+    const schemaNode = target.arguments[1];
+    if (!nameNode || !schemaNode) this.fail(target, "effect requires a name and schema");
+    const name = this.constantString(nameNode);
+    if (!name || name.length > 128) {
+      this.fail(nameNode, "effect name must be a non-empty compile-time string up to 128 characters");
+    }
+    if (this.effects.some((effect) => effect.name === name)) {
+      this.fail(nameNode, `Duplicate effect channel ${JSON.stringify(name)}`);
+    }
+    if (!ts.isObjectLiteralExpression(schemaNode)) {
+      this.fail(schemaNode, "effect schema must be an object literal");
+    }
+    if (schemaNode.properties.length > MAX_EFFECT_VALUES) {
+      this.fail(schemaNode, `effect payloads support at most ${MAX_EFFECT_VALUES} fields`);
+    }
+    const fields: EffectSlot["fields"] = [];
+    const names = new Set<string>();
+    for (const property of schemaNode.properties) {
+      if (!ts.isPropertyAssignment(property)) {
+        this.fail(property, "effect schema fields must use property assignments");
+      }
+      const fieldName = this.propertyName(property.name);
+      if (!fieldName || fieldName.length > 128 || names.has(fieldName)) {
+        this.fail(
+          property.name,
+          "effect schema field names must be unique non-empty strings up to 128 characters",
+        );
+      }
+      const kind = this.constantString(property.initializer);
+      if (kind !== "number" && kind !== "boolean") {
+        this.fail(property.initializer, 'effect field type must be "number" or "boolean"');
+      }
+      names.add(fieldName);
+      fields.push({ name: fieldName, kind });
+    }
+    if (this.effects.length > 0xffff) {
+      this.fail(target, "effect channel limit (65536) exceeded");
+    }
+    return { name, id: this.effects.length, fields };
   }
 
   collectHandlers(): void {
@@ -961,6 +1026,17 @@ class Compiler {
   }
 
   compileCall(call: ts.CallExpression, scope: Scope): boolean {
+    if (
+      ts.isPropertyAccessExpression(call.expression) &&
+      ts.isIdentifier(call.expression.expression) &&
+      call.expression.name.text === "emit"
+    ) {
+      const effect = this.effectBindings.get(call.expression.expression.text);
+      if (effect) {
+        this.emitEffect(effect, call, scope);
+        return false;
+      }
+    }
     const name = callName(call.expression);
     if (!name) this.fail(call.expression, "Realtime calls must target a named function");
     const delayScale = DELAY_SCALE[name as keyof typeof DELAY_SCALE];
@@ -1034,6 +1110,42 @@ class Compiler {
     if (!declaration) this.fail(call.expression, `Unsupported realtime function ${name}`);
     this.inlineFunction(declaration, call.arguments, scope);
     return false;
+  }
+
+  emitEffect(effect: EffectSlot, call: ts.CallExpression, scope: Scope): void {
+    if (call.arguments.length !== 1 || !call.arguments[0]) {
+      this.fail(call, `${effect.name}.emit requires one object payload`);
+    }
+    const payload = unwrapRealtimeExpression(call.arguments[0]);
+    if (!ts.isObjectLiteralExpression(payload)) {
+      this.fail(payload, "realtime effect payload must be an object literal");
+    }
+    const values = new Map<string, ts.Expression>();
+    for (const property of payload.properties) {
+      if (ts.isShorthandPropertyAssignment(property)) {
+        values.set(property.name.text, property.name);
+        continue;
+      }
+      if (!ts.isPropertyAssignment(property)) {
+        this.fail(property, "effect payload fields must use property assignments");
+      }
+      const name = this.propertyName(property.name);
+      if (!name || values.has(name)) {
+        this.fail(property.name, "effect payload field names must be unique identifiers or strings");
+      }
+      values.set(name, property.initializer);
+    }
+    for (const field of effect.fields) {
+      const value = values.get(field.name);
+      if (!value) this.fail(payload, `effect payload is missing ${JSON.stringify(field.name)}`);
+      this.requireValue(value, scope);
+      values.delete(field.name);
+    }
+    const extra = values.keys().next().value as string | undefined;
+    if (extra !== undefined) {
+      this.fail(payload, `effect payload has unknown field ${JSON.stringify(extra)}`);
+    }
+    this.emit(Opcode.EmitEffect, { a: effect.id, b: effect.fields.length });
   }
 
   emitDelay(call: ts.CallExpression, scope: Scope, name: string, scale: bigint): void {

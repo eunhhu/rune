@@ -1,5 +1,17 @@
 use core::fmt;
 
+pub const MAX_EFFECT_VALUES: usize = 8;
+
+/// Fixed-size transient payload emitted by realtime bytecode.
+///
+/// Only `values[..len]` is meaningful. The inline array keeps the VM hot path allocation-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectEvent {
+    pub id: u16,
+    pub len: u8,
+    pub values: [i64; MAX_EFFECT_VALUES],
+}
+
 /// Spellwire key identifiers use USB HID keyboard usage IDs, not platform virtual-key codes.
 pub mod key {
     pub const A: u16 = 0x04;

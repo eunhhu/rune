@@ -92,6 +92,12 @@ async function compileProgram(args: string[]): Promise<void> {
       { slot: state.slot, kind: state.kind },
     ]),
   );
+  const effects = Object.fromEntries(
+    result.module.effects.map((effect) => [
+      effect.name,
+      { id: effect.id, fields: effect.fields },
+    ]),
+  );
 
   await Bun.write(
     `${output}.json`,
@@ -103,6 +109,7 @@ async function compileProgram(args: string[]): Promise<void> {
         handlers: result.module.handlers.length,
         instructions: result.module.code.length,
         states,
+        effects,
       },
       null,
       2,

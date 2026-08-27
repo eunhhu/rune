@@ -1,7 +1,7 @@
 use core::fmt;
 
 pub const WIRE_MAGIC: [u8; 4] = *b"SPWR";
-pub const WIRE_VERSION: u16 = 4;
+pub const WIRE_VERSION: u16 = 5;
 pub const MIN_WIRE_VERSION: u16 = 3;
 pub const WIRE_HEADER_SIZE: usize = 24;
 pub const WIRE_HANDLER_SIZE: usize = 16;
@@ -58,6 +58,7 @@ pub enum Opcode {
     AddStateImm = 40,
     XorStateImm = 41,
     ToggleState = 42,
+    EmitEffect = 43,
 }
 
 impl TryFrom<u8> for Opcode {
@@ -108,6 +109,7 @@ impl TryFrom<u8> for Opcode {
             40 => Ok(Self::AddStateImm),
             41 => Ok(Self::XorStateImm),
             42 => Ok(Self::ToggleState),
+            43 => Ok(Self::EmitEffect),
             _ => Err(()),
         }
     }

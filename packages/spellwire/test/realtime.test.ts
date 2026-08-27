@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   Key,
+  effect,
   getFallbackRealtimeRegistrations,
   rt,
   sleep,
@@ -92,4 +93,14 @@ test("fallback hotkeys honor state gates", () => {
   enabled = true;
   registration?.handler();
   expect(hits).toBe(1);
+});
+
+test("typed effects retain readable fallback semantics", () => {
+  const changed = effect("changed", { count: "number", active: "boolean" });
+  const payloads: Array<{ readonly count: number; readonly active: boolean }> = [];
+  const release = changed.on((payload) => payloads.push(payload));
+  changed.emit({ count: 3, active: true });
+  release();
+  changed.emit({ count: 4, active: false });
+  expect(payloads).toEqual([{ count: 3, active: true }]);
 });

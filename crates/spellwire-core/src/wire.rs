@@ -9,6 +9,7 @@ use crate::{
 };
 
 const WIRE_VERSION_WITH_WIDE_DELAY: u16 = 4;
+const WIRE_VERSION_WITH_EFFECTS: u16 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
@@ -123,6 +124,9 @@ impl Program {
         for _ in 0..instruction_count {
             let raw_opcode = reader.u8()?;
             if version < WIRE_VERSION_WITH_WIDE_DELAY && raw_opcode > Opcode::DelayUs as u8 {
+                return Err(DecodeError::InvalidOpcode(raw_opcode));
+            }
+            if version < WIRE_VERSION_WITH_EFFECTS && raw_opcode > Opcode::ToggleState as u8 {
                 return Err(DecodeError::InvalidOpcode(raw_opcode));
             }
             let opcode = Opcode::try_from(raw_opcode)
@@ -247,5 +251,15 @@ mod tests {
             Program::decode(&bytes),
             Err(DecodeError::InvalidOpcode(raw)) if raw == Opcode::StoreStateImm as u8
         ));
+
+        bytes[4..6].copy_from_slice(&WIRE_VERSION_WITH_WIDE_DELAY.to_le_bytes());
+        bytes[opcode_offset] = Opcode::EmitEffect as u8;
+        assert!(matches!(
+            Program::decode(&bytes),
+            Err(DecodeError::InvalidOpcode(raw)) if raw == Opcode::EmitEffect as u8
+        ));
+
+        bytes[4..6].copy_from_slice(&WIRE_VERSION.to_le_bytes());
+        assert_eq!(Program::decode(&bytes).unwrap().code[0].opcode, Opcode::EmitEffect);
     }
 }

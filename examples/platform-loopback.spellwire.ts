@@ -1,6 +1,7 @@
-import { InputSource, Key, keyDown, keyUp, rt, sleepUs, tapKey } from "spellwire";
+import { InputSource, Key, effect, keyDown, keyUp, rt, sleepUs, tapKey } from "spellwire";
 
 let observed = 0;
+const loopback = effect("loopback", { observed: "number" });
 
 rt.onKeyDown(
   Key.F19,
@@ -25,6 +26,7 @@ rt.onKeyDown(
   Key.F20,
   () => {
     observed++;
+    loopback.emit({ observed });
   },
   { source: InputSource.Synthetic },
 );

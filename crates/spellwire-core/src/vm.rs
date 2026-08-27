@@ -5,9 +5,9 @@ use std::{
 };
 
 use crate::{
-    key, Edge, HandlerTable, InputDevice, InputEvent, InputSource, MouseButton, Opcode,
-    OutputEvent, Program, ProgramError, MODIFIER_ALT, MODIFIER_CONTROL, MODIFIER_META,
-    MODIFIER_SHIFT, TRIGGER_CONSUME,
+    key, Edge, EffectEvent, HandlerTable, InputDevice, InputEvent, InputSource, MouseButton,
+    Opcode, OutputEvent, Program, ProgramError, MAX_EFFECT_VALUES, MODIFIER_ALT, MODIFIER_CONTROL,
+    MODIFIER_META, MODIFIER_SHIFT, TRIGGER_CONSUME,
 };
 
 pub const MAX_STACK: usize = 256;
@@ -24,6 +24,27 @@ pub trait Injector {
     ///
     /// Returns the backend-specific error when the batch cannot be submitted.
     fn send(&mut self, events: &[OutputEvent]) -> Result<(), Self::Error>;
+
+    /// Publish a transient realtime effect. The default makes effects free for embedders that
+    /// do not attach a control plane and is eliminated by monomorphization.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend-specific error when the effect cannot be published.
+    #[inline]
+    fn effect(&mut self, _event: EffectEvent) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    /// Publish a changed persistent state slot. Unchanged writes never reach this method.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend-specific error when the change cannot be published.
+    #[inline]
+    fn state_changed(&mut self, _slot: u16, _value: i64) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -748,20 +769,49 @@ fn execute_until_yield<I: Injector>(
             }
             Opcode::PushConst => push!(instruction.immediate),
             Opcode::LoadState => push!(state[usize::from(instruction.a)]),
-            Opcode::StoreState => state[usize::from(instruction.a)] = pop!(),
+            Opcode::StoreState => {
+                let value = pop!();
+                let target = &mut state[usize::from(instruction.a)];
+                if *target != value {
+                    *target = value;
+                    injector
+                        .state_changed(instruction.a, value)
+                        .map_err(ExecutionFailure::Inject)?;
+                }
+            }
             Opcode::StoreStateImm => {
-                state[usize::from(instruction.a)] = instruction.immediate;
+                let target = &mut state[usize::from(instruction.a)];
+                if *target != instruction.immediate {
+                    *target = instruction.immediate;
+                    injector
+                        .state_changed(instruction.a, instruction.immediate)
+                        .map_err(ExecutionFailure::Inject)?;
+                }
             }
             Opcode::AddStateImm => {
                 let target = &mut state[usize::from(instruction.a)];
-                *target = target.wrapping_add(instruction.immediate);
+                let value = target.wrapping_add(instruction.immediate);
+                if *target != value {
+                    *target = value;
+                    injector
+                        .state_changed(instruction.a, value)
+                        .map_err(ExecutionFailure::Inject)?;
+                }
             }
             Opcode::XorStateImm => {
-                state[usize::from(instruction.a)] ^= instruction.immediate;
+                let target = &mut state[usize::from(instruction.a)];
+                let value = *target ^ instruction.immediate;
+                if *target != value {
+                    *target = value;
+                    injector
+                        .state_changed(instruction.a, value)
+                        .map_err(ExecutionFailure::Inject)?;
+                }
             }
             Opcode::ToggleState => {
                 let target = &mut state[usize::from(instruction.a)];
                 *target = i64::from(*target == 0);
+                injector.state_changed(instruction.a, *target).map_err(ExecutionFailure::Inject)?;
             }
             Opcode::LoadLocal => push!(scratch.locals[usize::from(instruction.a)]),
             Opcode::StoreLocal => scratch.locals[usize::from(instruction.a)] = pop!(),
@@ -919,6 +969,21 @@ fn execute_until_yield<I: Injector>(
                 cursor.deadline = deadline;
                 return Ok(ExecutionStep::Yield(cursor.deadline));
             }
+            Opcode::EmitEffect => {
+                let len = usize::try_from(instruction.b).unwrap_or(usize::MAX);
+                let mut values = [0; MAX_EFFECT_VALUES];
+                for index in (0..len).rev() {
+                    values[index] = pop!();
+                }
+                scratch.flush(injector).map_err(ExecutionFailure::Inject)?;
+                injector
+                    .effect(EffectEvent {
+                        id: instruction.a,
+                        len: u8::try_from(len).unwrap_or_default(),
+                        values,
+                    })
+                    .map_err(ExecutionFailure::Inject)?;
+            }
         }
     }
 }
@@ -1005,6 +1070,12 @@ pub fn validate_program(program: &Program) -> Result<(), ProgramError> {
                 return Err(ProgramError::InvalidLocalSlot {
                     instruction: index,
                     slot: instruction.a,
+                });
+            }
+            Opcode::EmitEffect if instruction.b as usize > MAX_EFFECT_VALUES => {
+                return Err(ProgramError::InvalidEffectArity {
+                    instruction: index,
+                    arity: instruction.b,
                 });
             }
             _ => {}
@@ -1104,6 +1175,82 @@ mod tests {
         runtime.dispatch(event, &mut injector, &mut scratch).unwrap();
         assert_eq!(runtime.get_state(0), Some(2));
         assert_eq!(injector.0.len(), 2);
+    }
+
+    #[test]
+    fn emits_inline_effect_payloads_and_changed_state_only() {
+        #[derive(Default)]
+        struct EffectInjector {
+            effects: Vec<EffectEvent>,
+            states: Vec<(u16, i64)>,
+        }
+
+        impl Injector for EffectInjector {
+            type Error = Infallible;
+
+            fn send(&mut self, _events: &[OutputEvent]) -> Result<(), Self::Error> {
+                Ok(())
+            }
+
+            fn effect(&mut self, event: EffectEvent) -> Result<(), Self::Error> {
+                self.effects.push(event);
+                Ok(())
+            }
+
+            fn state_changed(&mut self, slot: u16, value: i64) -> Result<(), Self::Error> {
+                self.states.push((slot, value));
+                Ok(())
+            }
+        }
+
+        let program = Program {
+            initial_state: vec![0].into_boxed_slice(),
+            handlers: vec![Handler {
+                trigger: Trigger {
+                    device: InputDevice::Keyboard,
+                    code: key::Q,
+                    edge: Edge::Down,
+                    source: SourceFilter::Physical,
+                    flags: 0,
+                    modifiers: 0,
+                    gate: crate::NO_STATE_GATE,
+                },
+                entry: 0,
+            }]
+            .into_boxed_slice(),
+            code: vec![
+                Instruction::new(Opcode::StoreStateImm).with_a(0).with_immediate(9),
+                Instruction::new(Opcode::StoreStateImm).with_a(0).with_immediate(9),
+                Instruction::new(Opcode::PushConst).with_immediate(9),
+                Instruction::new(Opcode::PushConst).with_immediate(1),
+                Instruction::new(Opcode::EmitEffect).with_a(4).with_b(2),
+                Instruction::new(Opcode::Halt),
+            ]
+            .into_boxed_slice(),
+            local_count: 0,
+            stack_limit: 8,
+            instruction_budget: 100,
+        };
+        let mut runtime = Runtime::new(program, RuntimeConfig::default()).unwrap();
+        let mut injector = EffectInjector::default();
+        let mut scratch = VmScratch::new();
+        runtime
+            .dispatch(
+                InputEvent {
+                    device: InputDevice::Keyboard,
+                    code: key::Q,
+                    edge: Edge::Down,
+                    source: InputSource::Physical,
+                },
+                &mut injector,
+                &mut scratch,
+            )
+            .unwrap();
+
+        assert_eq!(injector.states, vec![(0, 9)]);
+        assert_eq!(injector.effects.len(), 1);
+        assert_eq!(injector.effects[0].id, 4);
+        assert_eq!(injector.effects[0].values[..2], [9, 1]);
     }
 
     #[test]

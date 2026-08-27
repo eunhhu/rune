@@ -1,8 +1,8 @@
 use std::{convert::Infallible, hint::black_box, time::Instant};
 
 use spellwire_core::{
-    key, Edge, Handler, Injector, InputDevice, InputEvent, InputSource, Instruction, Opcode,
-    OutputEvent, Program, Runtime, RuntimeConfig, SourceFilter, Trigger, VmScratch,
+    key, Edge, EffectEvent, Handler, Injector, InputDevice, InputEvent, InputSource, Instruction,
+    Opcode, OutputEvent, Program, Runtime, RuntimeConfig, SourceFilter, Trigger, VmScratch,
 };
 
 const DEFAULT_SAMPLES: usize = 1_000_000;
@@ -17,14 +17,32 @@ impl Injector for NullInjector {
         black_box(events);
         Ok(())
     }
+
+    fn effect(&mut self, event: EffectEvent) -> Result<(), Self::Error> {
+        black_box(event);
+        Ok(())
+    }
 }
 
 fn main() {
-    let samples = std::env::args()
-        .nth(1)
-        .and_then(|value| value.parse::<usize>().ok())
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    let samples = arguments
+        .iter()
+        .find_map(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_SAMPLES);
+    let include_effect = arguments.iter().any(|value| value == "--effect");
+
+    let mut code = vec![
+        Instruction::new(Opcode::AddStateImm).with_a(0).with_immediate(1),
+        Instruction::new(Opcode::KeyDown).with_a(key::E),
+        Instruction::new(Opcode::KeyUp).with_a(key::E),
+    ];
+    if include_effect {
+        code.push(Instruction::new(Opcode::LoadState).with_a(0));
+        code.push(Instruction::new(Opcode::EmitEffect).with_b(1));
+    }
+    code.push(Instruction::new(Opcode::Halt));
 
     let program = Program {
         initial_state: vec![0].into_boxed_slice(),
@@ -41,13 +59,7 @@ fn main() {
             entry: 0,
         }]
         .into_boxed_slice(),
-        code: vec![
-            Instruction::new(Opcode::AddStateImm).with_a(0).with_immediate(1),
-            Instruction::new(Opcode::KeyDown).with_a(key::E),
-            Instruction::new(Opcode::KeyUp).with_a(key::E),
-            Instruction::new(Opcode::Halt),
-        ]
-        .into_boxed_slice(),
+        code: code.into_boxed_slice(),
         local_count: 0,
         stack_limit: 16,
         instruction_budget: 1_000,
@@ -74,7 +86,7 @@ fn main() {
     }
     timings.sort_unstable();
 
-    println!("Spellwire VM dispatch benchmark ({samples} samples)");
+    println!("Spellwire VM dispatch benchmark ({samples} samples, effect={include_effect})");
     println!("p50  {:>8} ns", percentile(&timings, 500));
     println!("p95  {:>8} ns", percentile(&timings, 950));
     println!("p99  {:>8} ns", percentile(&timings, 990));
@@ -82,7 +94,8 @@ fn main() {
     println!("max  {:>8} ns", timings.last().copied().unwrap_or(0));
     println!();
     println!(
-        "Scope: trigger lookup + persistent-state VM + null injection. HID, OS injection and target polling are excluded."
+        "Scope: trigger lookup + persistent-state VM + null injection{}. HID, OS injection and target polling are excluded.",
+        if include_effect { " + one inline effect" } else { "" },
     );
 }
 

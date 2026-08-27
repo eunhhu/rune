@@ -2,6 +2,64 @@ import type { Key, Modifier, MouseButton } from "./keys";
 import { InputSource } from "./keys";
 import { parseHotkey } from "./hotkey";
 
+export type EffectValueKind = "number" | "boolean";
+export type EffectSchema = Readonly<Record<string, EffectValueKind>>;
+export type EffectPayload<S extends EffectSchema> = {
+  readonly [K in keyof S]: S[K] extends "boolean" ? boolean : number;
+};
+
+export interface RealtimeEffect<S extends EffectSchema> {
+  readonly name: string;
+  readonly schema: S;
+  emit(payload: EffectPayload<S>): void;
+  on(handler: (payload: EffectPayload<S>) => void): () => void;
+}
+
+/**
+ * Declares a transient typed channel. The AOT compiler lowers `channel.emit({...})` to one
+ * fixed-payload opcode; the JavaScript implementation is only used by fallback execution.
+ */
+export function effect<const S extends EffectSchema>(name: string, schema: S): RealtimeEffect<S> {
+  if (name.length === 0 || name.length > 128) {
+    throw new RangeError("effect name must contain between 1 and 128 characters");
+  }
+  const fields = Object.entries(schema);
+  if (fields.length > 8) throw new RangeError("effect schemas support at most eight fields");
+  for (const [field, kind] of fields) {
+    if (field.length === 0 || field.length > 128 || (kind !== "number" && kind !== "boolean")) {
+      throw new TypeError("effect schema fields must be named number/boolean values");
+    }
+  }
+  const handlers = new Set<(payload: EffectPayload<S>) => void>();
+  return Object.freeze({
+    name,
+    schema: Object.freeze({ ...schema }) as S,
+    emit(payload: EffectPayload<S>): void {
+      if (Object.keys(payload).length !== fields.length) {
+        throw new TypeError("effect payload fields must exactly match its schema");
+      }
+      for (const [field, kind] of fields) {
+        if (!Object.hasOwn(payload, field)) {
+          throw new TypeError("effect payload fields must exactly match its schema");
+        }
+        const value = payload[field];
+        if (
+          (kind === "number" && (typeof value !== "number" || !Number.isSafeInteger(value))) ||
+          (kind === "boolean" && typeof value !== "boolean")
+        ) {
+          throw new TypeError(`effect field ${JSON.stringify(field)} must be a ${kind}`);
+        }
+      }
+      for (const handler of handlers) handler(payload);
+    },
+    on(handler: (payload: EffectPayload<S>) => void): () => void {
+      const registration = (payload: EffectPayload<S>): void => handler(payload);
+      handlers.add(registration);
+      return () => handlers.delete(registration);
+    },
+  });
+}
+
 export interface RealtimeOptions {
   source?: InputSource;
   /** Suppress the original physical transition when the native platform supports it. */

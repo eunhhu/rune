@@ -1,4 +1,4 @@
-use core::{ffi::c_char, mem, ptr, ptr::NonNull, slice};
+use core::{cell::Cell, ffi::c_char, mem, ptr, ptr::NonNull, slice};
 use std::{
     sync::{
         atomic::{AtomicI32, Ordering},
@@ -10,8 +10,8 @@ use std::{
 };
 
 use spellwire_core::{
-    ContinuationScheduler, Edge, Injector, InputDevice, InputEvent, InputSource, MouseButton,
-    OutputEvent, Program, Runtime, RuntimeConfig,
+    ContinuationScheduler, Edge, EffectEvent, Injector, InputDevice, InputEvent, InputSource,
+    MouseButton, OutputEvent, Program, Runtime, RuntimeConfig,
 };
 
 use crate::platform::{
@@ -38,6 +38,10 @@ const DYNAMIC_RING_WRITE: usize = 0;
 const DYNAMIC_RING_READ: usize = 1;
 const DYNAMIC_RING_DROPPED: usize = 2;
 const DYNAMIC_RING_CLOSED: usize = 3;
+const RUNTIME_EVENT_RECORD_WORDS: usize = 20;
+const RUNTIME_EVENT_STATE: i32 = 1;
+const RUNTIME_EVENT_EFFECT: i32 = 2;
+const RUNTIME_EVENT_RELOAD: i32 = 3;
 
 pub struct SpellwireHost {
     state: Mutex<HostState>,
@@ -63,6 +67,61 @@ enum HostCommand {
     Reload { program: Program, preserve_state: bool, reply: SyncSender<i32> },
     Dispatch { event: InputEvent, reply: SyncSender<i32> },
     SetInputRing { ring: Option<DynamicRing>, reply: SyncSender<()> },
+    SetEventRing { ring: Option<RuntimeEventRing>, reply: SyncSender<()> },
+}
+
+struct RuntimeEventRing(DynamicRing);
+
+// SAFETY: Same lifetime and synchronization contract as `DynamicRing`.
+unsafe impl Send for RuntimeEventRing {}
+
+impl RuntimeEventRing {
+    unsafe fn new(words: *mut i32, word_len: usize, capacity: usize) -> Option<Self> {
+        // SAFETY: The caller provides the same validated shared-memory contract.
+        unsafe {
+            DynamicRing::new_with_record_words(
+                words,
+                word_len,
+                capacity,
+                RUNTIME_EVENT_RECORD_WORDS,
+            )
+        }
+        .map(Self)
+    }
+
+    #[inline]
+    fn state(&self, slot: u16, value: i64) {
+        let [lo, hi] = split_i64(value);
+        self.0.push_record(&[RUNTIME_EVENT_STATE, i32::from(slot), 1, 0, lo, hi]);
+    }
+
+    #[inline]
+    fn effect(&self, event: EffectEvent) {
+        let mut record = [0; RUNTIME_EVENT_RECORD_WORDS];
+        record[0] = RUNTIME_EVENT_EFFECT;
+        record[1] = i32::from(event.id);
+        record[2] = i32::from(event.len);
+        for (index, value) in event.values[..usize::from(event.len)].iter().copied().enumerate() {
+            let [lo, hi] = split_i64(value);
+            record[4 + index * 2] = lo;
+            record[5 + index * 2] = hi;
+        }
+        self.0.push_record(&record);
+    }
+
+    #[inline]
+    fn reload(&self) {
+        self.0.push_record(&[RUNTIME_EVENT_RELOAD, 0, 0, 0]);
+    }
+}
+
+#[inline]
+fn split_i64(value: i64) -> [i32; 2] {
+    let bytes = value.to_le_bytes();
+    [
+        i32::from_le_bytes(bytes[0..4].try_into().unwrap_or_default()),
+        i32::from_le_bytes(bytes[4..8].try_into().unwrap_or_default()),
+    ]
 }
 
 struct StateSnapshot {
@@ -90,6 +149,9 @@ struct DynamicRing {
     words: NonNull<AtomicI32>,
     capacity: u32,
     mask: u32,
+    record_words: usize,
+    write: Cell<u32>,
+    read_cache: Cell<u32>,
 }
 
 // SAFETY: The pointer targets SharedArrayBuffer storage retained by the Bun host. Every native
@@ -98,61 +160,88 @@ unsafe impl Send for DynamicRing {}
 
 impl DynamicRing {
     unsafe fn new(words: *mut i32, word_len: usize, capacity: usize) -> Option<Self> {
+        // SAFETY: The caller provides the documented shared-memory lifetime.
+        unsafe { Self::new_with_record_words(words, word_len, capacity, DYNAMIC_RING_RECORD_WORDS) }
+    }
+
+    unsafe fn new_with_record_words(
+        words: *mut i32,
+        word_len: usize,
+        capacity: usize,
+        record_words: usize,
+    ) -> Option<Self> {
         if words.is_null()
             || words.align_offset(mem::align_of::<AtomicI32>()) != 0
             || capacity < 2
             || capacity > i32::MAX as usize
             || !capacity.is_power_of_two()
             || word_len
-                != DYNAMIC_RING_HEADER_WORDS
-                    .checked_add(capacity.checked_mul(DYNAMIC_RING_RECORD_WORDS)?)?
+                != DYNAMIC_RING_HEADER_WORDS.checked_add(capacity.checked_mul(record_words)?)?
         {
             return None;
         }
+        let atomic_words = words.cast::<AtomicI32>();
+        // SAFETY: Alignment and the complete header range were validated above.
+        let write = unsafe { (*atomic_words.add(DYNAMIC_RING_WRITE)).load(Ordering::Acquire) };
+        // SAFETY: Alignment and the complete header range were validated above.
+        let read = unsafe { (*atomic_words.add(DYNAMIC_RING_READ)).load(Ordering::Acquire) };
         Some(Self {
             words: NonNull::new(words.cast())?,
             capacity: u32::try_from(capacity).ok()?,
             mask: u32::try_from(capacity - 1).ok()?,
+            record_words,
+            write: Cell::new(u32::from_ne_bytes(write.to_ne_bytes())),
+            read_cache: Cell::new(u32::from_ne_bytes(read.to_ne_bytes())),
         })
     }
 
-    fn push(&self, event: InputEvent) {
+    #[inline]
+    fn push_record(&self, record: &[i32]) {
+        debug_assert!(record.len() <= self.record_words);
+        if record.len() > self.record_words {
+            return;
+        }
         let words = self.words.as_ptr();
-        // SAFETY: Construction validates the complete ring buffer and the FFI contract keeps it
-        // live until a synchronous detach or host stop. All indexes below are in that buffer.
+        // SAFETY: Ring construction and the synchronous attach/detach contract keep all indexed
+        // words valid. The release write publishes relaxed payload stores to the JS consumer.
         unsafe {
             if (*words.add(DYNAMIC_RING_CLOSED)).load(Ordering::Acquire) != 0 {
                 return;
             }
-            let write = u32::from_ne_bytes(
-                (*words.add(DYNAMIC_RING_WRITE)).load(Ordering::Relaxed).to_ne_bytes(),
-            );
-            let read = u32::from_ne_bytes(
-                (*words.add(DYNAMIC_RING_READ)).load(Ordering::Acquire).to_ne_bytes(),
-            );
+            let write = self.write.get();
+            let mut read = self.read_cache.get();
             if write.wrapping_sub(read) >= self.capacity {
-                (*words.add(DYNAMIC_RING_DROPPED)).fetch_add(1, Ordering::Relaxed);
-                return;
+                read = u32::from_ne_bytes(
+                    (*words.add(DYNAMIC_RING_READ)).load(Ordering::Acquire).to_ne_bytes(),
+                );
+                self.read_cache.set(read);
+                if write.wrapping_sub(read) >= self.capacity {
+                    (*words.add(DYNAMIC_RING_DROPPED)).fetch_add(1, Ordering::Relaxed);
+                    return;
+                }
             }
             let base = DYNAMIC_RING_HEADER_WORDS
-                + usize::try_from(write & self.mask).unwrap_or_default()
-                    * DYNAMIC_RING_RECORD_WORDS;
-            let timestamp = monotonic_timestamp_ns();
-            let timestamp_bytes = timestamp.to_le_bytes();
-            let record = [
-                event.device as i32,
-                i32::from(event.code),
-                event.edge as i32,
-                event.source as i32,
-                i32::from_le_bytes(timestamp_bytes[0..4].try_into().unwrap_or_default()),
-                i32::from_le_bytes(timestamp_bytes[4..8].try_into().unwrap_or_default()),
-            ];
-            for (index, value) in record.into_iter().enumerate() {
+                + usize::try_from(write & self.mask).unwrap_or_default() * self.record_words;
+            for (index, value) in record.iter().copied().enumerate() {
                 (*words.add(base + index)).store(value, Ordering::Relaxed);
             }
+            let next = write.wrapping_add(1);
             (*words.add(DYNAMIC_RING_WRITE))
-                .store(i32::from_ne_bytes(write.wrapping_add(1).to_ne_bytes()), Ordering::Release);
+                .store(i32::from_ne_bytes(next.to_ne_bytes()), Ordering::Release);
+            self.write.set(next);
         }
+    }
+
+    fn push(&self, event: InputEvent) {
+        let timestamp_bytes = monotonic_timestamp_ns().to_le_bytes();
+        self.push_record(&[
+            event.device as i32,
+            i32::from(event.code),
+            event.edge as i32,
+            event.source as i32,
+            i32::from_le_bytes(timestamp_bytes[0..4].try_into().unwrap_or_default()),
+            i32::from_le_bytes(timestamp_bytes[4..8].try_into().unwrap_or_default()),
+        ]);
     }
 }
 
@@ -165,6 +254,7 @@ struct TrackingInjector {
     inner: PlatformInjector,
     keys: [bool; 256],
     mouse: [bool; 5],
+    events: Option<RuntimeEventRing>,
 }
 
 struct PolicyPublisher {
@@ -189,7 +279,7 @@ impl PolicyPublisher {
 
 impl TrackingInjector {
     fn new(inner: PlatformInjector) -> Self {
-        Self { inner, keys: [false; 256], mouse: [false; 5] }
+        Self { inner, keys: [false; 256], mouse: [false; 5], events: None }
     }
 
     fn release_all(&mut self) -> Result<(), PlatformError> {
@@ -215,6 +305,26 @@ impl TrackingInjector {
         self.keys.fill(false);
         self.mouse.fill(false);
         Ok(())
+    }
+
+    fn set_event_ring(&mut self, ring: Option<RuntimeEventRing>, runtime: &Runtime) {
+        self.events = ring;
+        if let Some(ring) = &self.events {
+            for (slot, value) in runtime.state().iter().copied().enumerate() {
+                let Ok(slot) = u16::try_from(slot) else { break };
+                ring.state(slot, value);
+            }
+        }
+    }
+
+    fn publish_reload(&self, runtime: &Runtime) {
+        if let Some(ring) = &self.events {
+            ring.reload();
+            for (slot, value) in runtime.state().iter().copied().enumerate() {
+                let Ok(slot) = u16::try_from(slot) else { break };
+                ring.state(slot, value);
+            }
+        }
     }
 }
 
@@ -246,6 +356,22 @@ impl Injector for TrackingInjector {
                 }
                 _ => {}
             }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn effect(&mut self, event: EffectEvent) -> Result<(), Self::Error> {
+        if let Some(ring) = &self.events {
+            ring.effect(event);
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn state_changed(&mut self, slot: u16, value: i64) -> Result<(), Self::Error> {
+        if let Some(ring) = &self.events {
+            ring.state(slot, value);
         }
         Ok(())
     }
@@ -411,10 +537,8 @@ fn run_worker(
                     let _ = reply.send(runtime.get_state(slot));
                 }
                 Ok(HostCommand::SetState { slot, value, reply }) => {
-                    let updated = runtime.set_state(slot, value);
-                    if updated {
-                        policy.synchronize(&runtime);
-                    }
+                    let updated =
+                        set_runtime_state(&mut runtime, &mut injector, &mut policy, slot, value);
                     let _ = reply.send(updated);
                 }
                 Ok(HostCommand::SnapshotState { output, reply }) => {
@@ -450,6 +574,9 @@ fn run_worker(
                     input_ring = ring;
                     let _ = reply.send(());
                 }
+                Ok(HostCommand::SetEventRing { ring, reply }) => {
+                    set_runtime_event_ring(&mut injector, &runtime, ring, &reply);
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => break 'worker,
             }
@@ -484,6 +611,36 @@ fn run_worker(
     if let Err(error) = injector.release_all() {
         set_worker_error(last_error, &error.to_string());
     }
+}
+
+fn set_runtime_state(
+    runtime: &mut Runtime,
+    injector: &mut TrackingInjector,
+    policy: &mut PolicyPublisher,
+    slot: usize,
+    value: i64,
+) -> bool {
+    let changed = runtime.get_state(slot).is_some_and(|current| current != value);
+    let updated = runtime.set_state(slot, value);
+    if updated {
+        if changed {
+            if let Ok(slot) = u16::try_from(slot) {
+                let _ = injector.state_changed(slot, value);
+            }
+        }
+        policy.synchronize(runtime);
+    }
+    updated
+}
+
+fn set_runtime_event_ring(
+    injector: &mut TrackingInjector,
+    runtime: &Runtime,
+    ring: Option<RuntimeEventRing>,
+    reply: &SyncSender<()>,
+) {
+    injector.set_event_ring(ring, runtime);
+    let _ = reply.send(());
 }
 
 fn recover_input_overflow(
@@ -576,6 +733,7 @@ fn reload_runtime(
     scheduler.clear();
     *runtime = replacement;
     policy.replace(runtime);
+    injector.publish_reload(runtime);
     STATUS_OK
 }
 
@@ -861,6 +1019,45 @@ pub unsafe extern "C" fn spellwire_host_set_input_ring(
     }
 }
 
+/// Attaches or detaches the native-to-control-plane runtime event ring.
+///
+/// Records are 20 `i32` words. The header is `[write, read, dropped, closed]`; record kind 1 is a
+/// changed state slot, kind 2 is a fixed `i64` effect payload, and kind 3 marks a program reload.
+/// The call is synchronous, so storage must remain live until detach or host stop.
+///
+/// # Safety
+///
+/// `host` must remain live. For attachment, `words` must point to aligned writable shared storage
+/// satisfying the documented layout and lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn spellwire_host_set_event_ring(
+    host: *mut SpellwireHost,
+    words: *mut i32,
+    word_len: usize,
+    capacity: usize,
+) -> i32 {
+    let Some(host) = (unsafe { host.as_ref() }) else { return STATUS_NULL };
+    let ring = if words.is_null() {
+        None
+    } else {
+        // SAFETY: The FFI caller promises the documented buffer validity and lifetime.
+        let Some(ring) = (unsafe { RuntimeEventRing::new(words, word_len, capacity) }) else {
+            return STATUS_INVALID_ARGUMENT;
+        };
+        Some(ring)
+    };
+    let sender = match host.command_sender() {
+        Ok(sender) => sender,
+        Err(status) => return status,
+    };
+    let (reply_sender, reply_receiver) = mpsc::sync_channel(1);
+    let command = HostCommand::SetEventRing { ring, reply: reply_sender };
+    match send_command(&sender, command, &reply_receiver) {
+        Ok(()) => STATUS_OK,
+        Err(status) => status,
+    }
+}
+
 /// Copies the latest host error as UTF-8 with a trailing NUL and returns required buffer length.
 ///
 /// Passing null or zero capacity only queries required length.
@@ -901,7 +1098,7 @@ pub extern "C" fn spellwire_request_permissions() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use spellwire_core::{key, Handler, Instruction, Opcode, SourceFilter, Trigger};
+    use spellwire_core::{key, EffectEvent, Handler, Instruction, Opcode, SourceFilter, Trigger};
 
     use super::*;
 
@@ -938,6 +1135,33 @@ mod tests {
         assert_eq!(words[DYNAMIC_RING_DROPPED].load(Ordering::Relaxed), 1);
         assert_eq!(words[DYNAMIC_RING_HEADER_WORDS].load(Ordering::Relaxed), 0);
         assert_eq!(words[DYNAMIC_RING_HEADER_WORDS + 1].load(Ordering::Relaxed), 0x04);
+    }
+
+    #[test]
+    fn runtime_event_ring_publishes_state_and_inline_effect_records() {
+        let capacity = 4;
+        let word_len = DYNAMIC_RING_HEADER_WORDS + capacity * RUNTIME_EVENT_RECORD_WORDS;
+        let mut words: Vec<AtomicI32> = (0..word_len).map(|_| AtomicI32::new(0)).collect();
+        // SAFETY: Exact aligned ring storage remains allocated for the complete test.
+        let ring = unsafe {
+            RuntimeEventRing::new(words.as_mut_ptr().cast(), words.len(), capacity).unwrap()
+        };
+
+        ring.state(3, -1);
+        ring.effect(EffectEvent { id: 7, len: 2, values: [42, i64::MIN, 0, 0, 0, 0, 0, 0] });
+
+        assert_eq!(words[DYNAMIC_RING_WRITE].load(Ordering::Acquire), 2);
+        let state = DYNAMIC_RING_HEADER_WORDS;
+        assert_eq!(words[state].load(Ordering::Relaxed), RUNTIME_EVENT_STATE);
+        assert_eq!(words[state + 1].load(Ordering::Relaxed), 3);
+        assert_eq!(words[state + 4].load(Ordering::Relaxed), -1);
+        assert_eq!(words[state + 5].load(Ordering::Relaxed), -1);
+        let effect = state + RUNTIME_EVENT_RECORD_WORDS;
+        assert_eq!(words[effect].load(Ordering::Relaxed), RUNTIME_EVENT_EFFECT);
+        assert_eq!(words[effect + 1].load(Ordering::Relaxed), 7);
+        assert_eq!(words[effect + 2].load(Ordering::Relaxed), 2);
+        assert_eq!(words[effect + 4].load(Ordering::Relaxed), 42);
+        assert_eq!(words[effect + 7].load(Ordering::Relaxed), i32::MIN);
     }
 
     #[test]

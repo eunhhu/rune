@@ -16,9 +16,10 @@ test("compile creates an explicit output directory and state manifest", async ()
   try {
     await Bun.write(
       input,
-      `import { Key, rt, tapKey } from "spellwire";\n` +
+      `import { Key, effect, rt, tapKey } from "spellwire";\n` +
         `let count = 0;\n` +
-        `rt.onKeyDown(Key.Q, () => { count += 1; tapKey(Key.E); });\n`,
+        `const changed = effect("changed", { count: "number" });\n` +
+        `rt.onKeyDown(Key.Q, () => { count += 1; changed.emit({ count }); tapKey(Key.E); });\n`,
     );
 
     await runCli(["compile", input, output]);
@@ -27,6 +28,10 @@ test("compile creates an explicit output directory and state manifest", async ()
     const manifest = await Bun.file(`${output}.json`).json();
     expect(manifest.handlers).toBe(1);
     expect(manifest.states.count).toEqual({ slot: 0, kind: "number" });
+    expect(manifest.effects.changed).toEqual({
+      id: 0,
+      fields: [{ name: "count", kind: "number" }],
+    });
 
     const defaultCompile = Bun.spawn([process.execPath, spellwireCli, "compile"], {
       cwd: target,

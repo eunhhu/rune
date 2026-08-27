@@ -93,6 +93,40 @@ describe("Spellwire TypeScript AOT compiler", () => {
     expect(delays[3]).toMatchObject({ flags: 0xc0, immediate: 1_000_000n });
   });
 
+  test("lowers typed effect payloads to one fixed-width opcode", () => {
+    const result = compileSource(`
+      import { Key, effect, rt } from "../src/index";
+      let count = 0;
+      let enabled = true;
+      const changed = effect("changed", { count: "number", enabled: "boolean" });
+      rt.onKeyDown(Key.Q, () => {
+        count++;
+        changed.emit({ count, enabled });
+      });
+    `);
+
+    expect(result.module.effects).toEqual([{
+      name: "changed",
+      id: 0,
+      fields: [
+        { name: "count", kind: "number" },
+        { name: "enabled", kind: "boolean" },
+      ],
+    }]);
+    expect(result.module.code.find(({ opcode }) => opcode === Opcode.EmitEffect)).toMatchObject({
+      a: 0,
+      b: 2,
+    });
+  });
+
+  test("rejects malformed realtime effect payloads", () => {
+    expect(() => compileSource(`
+      import { Key, effect, rt } from "../src/index";
+      const changed = effect("changed", { count: "number" });
+      rt.onKeyDown(Key.Q, () => changed.emit({ nope: 1 }));
+    `)).toThrow(SpellwireCompileError);
+  });
+
   test("ignores unrelated dynamic TypeScript until realtime code captures it", () => {
     const source = `
       import { Key, rt } from "../src/index";

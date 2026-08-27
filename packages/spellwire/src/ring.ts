@@ -84,6 +84,14 @@ export class SpscInt32Ring {
     return true;
   }
 
+  /** Discards currently queued records from the consumer side and returns their count. */
+  clear(): number {
+    const read = Atomics.load(this.header, READ_INDEX) >>> 0;
+    const write = Atomics.load(this.header, WRITE_INDEX) >>> 0;
+    Atomics.store(this.header, READ_INDEX, write | 0);
+    return (write - read) >>> 0;
+  }
+
   close(): void {
     Atomics.store(this.header, CLOSED_INDEX, 1);
     Atomics.notify(this.header, WRITE_INDEX);

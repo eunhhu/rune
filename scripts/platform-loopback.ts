@@ -11,6 +11,14 @@ import {
 } from "../packages/spellwire/src/index";
 
 const host = await NativeHost.load("examples/platform-loopback.spellwire.ts");
+let effectObserved = 0;
+let stateObserved = 0;
+const releaseEffect = host.effects.on("loopback", (payload) => {
+  effectObserved = Number(payload.observed);
+});
+const releaseState = host.onStateChange((state) => {
+  if (state.observed === 1) stateObserved = 1;
+});
 try {
   const permissions = Bun.argv.includes("--request-permissions")
     ? host.requestPermissions()
@@ -27,11 +35,20 @@ try {
   const start = Bun.nanoseconds();
   host.dispatch(InputDevice.Keyboard, Key.F19, InputEdge.Down, EventSource.Physical);
   const deadline = performance.now() + 2_000;
-  while (host.state("observed").get() !== 1 && performance.now() < deadline) {
+  while (
+    (host.state("observed").get() !== 1 || effectObserved !== 1 || stateObserved !== 1) &&
+    performance.now() < deadline
+  ) {
     await Bun.sleep(5);
   }
   const observed = host.state("observed").get();
   if (observed !== 1) throw new Error(`synthetic F20 loopback timed out (state=${observed})`);
+  if (effectObserved !== 1 || stateObserved !== 1) {
+    throw new Error(
+      `runtime event lane timed out (${JSON.stringify({ effectObserved, stateObserved })})`,
+    );
+  }
+  const initialEffectObserved = effectObserved;
   await Bun.sleep(25);
   lane.drain();
 
@@ -58,10 +75,15 @@ try {
       arch: process.arch,
       loopback: "ok",
       observed,
+      initialEffectObserved,
+      finalEffectObserved: effectObserved,
+      stateObserved,
       reloadReleasedHeldInput: true,
       elapsedUs: Math.round((Bun.nanoseconds() - start) / 1_000),
     }),
   );
 } finally {
+  releaseEffect();
+  releaseState();
   host.close();
 }

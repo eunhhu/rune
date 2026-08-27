@@ -4,7 +4,6 @@ import { Spellwire, ui } from "../packages/spellwire/src/index";
 const app = await Spellwire.start({
   input: fileURLToPath(new URL("../examples/stateful.spellwire.ts", import.meta.url)),
   overlayOptions: {
-    fps: 0,
     window: { title: "Spellwire Overlay Smoke" },
   },
   overlay: (state) =>

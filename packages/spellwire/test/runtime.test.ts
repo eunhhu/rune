@@ -4,6 +4,8 @@ import {
   EventSource,
   InputDevice,
   InputEdge,
+  RuntimeEventLane,
+  readRuntimeEventI64,
   type InputEvent,
 } from "../src/runtime";
 
@@ -69,5 +71,33 @@ describe("DynamicInputLane", () => {
     });
     pushKey(lane, 4);
     expect(lane.drain()).toBe(1);
+  });
+});
+
+describe("RuntimeEventLane", () => {
+  test("delivers changed state and fixed i64 effect payloads", () => {
+    const lane = new RuntimeEventLane(4);
+    const state: Array<[number, bigint]> = [];
+    const effects: Array<[number, bigint, bigint]> = [];
+    lane.onState((slot, value) => state.push([slot, value]));
+    lane.onEffectRaw((id, length, record, offset) => {
+      expect(length).toBe(2);
+      effects.push([
+        id,
+        readRuntimeEventI64(record, offset),
+        readRuntimeEventI64(record, offset + 2),
+      ]);
+    });
+
+    const stateRecord = new Int32Array(20);
+    stateRecord.set([1, 3, 1, 0, -1, -1]);
+    const effectRecord = new Int32Array(20);
+    effectRecord.set([2, 7, 2, 0, 42, 0, 0, -0x8000_0000]);
+    expect(lane.ring.push(stateRecord)).toBe(true);
+    expect(lane.ring.push(effectRecord)).toBe(true);
+    expect(lane.drain()).toBe(2);
+
+    expect(state).toEqual([[3, -1n]]);
+    expect(effects).toEqual([[7, 42n, -0x8000_0000_0000_0000n]]);
   });
 });
