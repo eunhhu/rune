@@ -1,12 +1,10 @@
-# Spellwire API — one-page reference
+# Spellwire API reference
 
 [한국어](api.ko.md)
 
-This is the canonical copy-and-use reference for normal Spellwire applications. It keeps project commands, realtime automation, persistent state, application lifecycle, and overlay UI on one page. The other documents explain internals, platform verification, and design rationale; they are not required to look up everyday API.
+This reference covers project commands, realtime automation, persistent state, application lifecycle, and overlay UI. Related guides explain platform verification, implementation details, and design decisions.
 
-Only APIs that exist in the current source tree appear here. Older sketches such as `macro(...)`, `spellwire.start()`, `rt.load(...)`, `on.keyDown(...)`, or `key.tap(...)` are not exported.
-
-## Find an API without leaving this page
+## Quick lookup
 
 | I want to… | Use | Section |
 | --- | --- | --- |
@@ -25,7 +23,7 @@ Only APIs that exist in the current source tree appear here. Older sketches such
 | Configure topmost/transparency/focus | `overlayOptions.window` | [Window behavior](#window-behavior) |
 | Control the native host directly | `NativeHost` | [Native host and permissions](#native-host-and-permissions) |
 
-## Copyable complete application
+## Example: state-driven input and overlay
 
 Generated projects contain one `src/main.ts`. The compiler extracts only realtime handlers into native bytecode; the same file's unrestricted application and overlay code stays on Bun. This keeps authoring unified without moving JavaScript onto the input-event path.
 
@@ -156,6 +154,27 @@ The compiler package exports programmatic compiler/encoder APIs:
 ```ts
 import { compileSource, encodeModule } from "spellwire/compiler";
 ```
+
+## Public export index
+
+The package root exports the following public names. The detailed sections below cover the common application APIs; lower-level types are included here for editor search and library integration.
+
+| Area | Exports |
+| --- | --- |
+| Keys and hotkeys | `Key`, `Modifier`, `MouseButton`, `InputSource`, `parseHotkey`, `ParsedHotkey` |
+| Application | `Spellwire`, `SpellwireStartOptions` |
+| Realtime registration | `rt`, `HotkeyOptions`, `RemapOptions`, `RealtimeOptions`, `RealtimeRegistration` |
+| Realtime output | `keyDown`, `keyUp`, `tapKey`, `keyHeld`, `mouseDown`, `mouseUp`, `clickMouse`, `mouseHeld`, `moveMouse`, `wheelMouse`, `sleep`, `sleepUs`, `sleepMs`, `sleepSeconds`, `sleepMinutes`, `sleepHours` |
+| Fallback testing | `getFallbackRealtimeRegistrations`, `withRealtimeActionSink`, `RealtimeActionSink` |
+| Runtime and dynamic lane | `DynamicInputLane`, `EventSource`, `InputDevice`, `InputEdge`, `InputEvent`, `InputHandler`, `NativeState`, `NativeStateBridge`, `SpscInt32Ring` |
+| Overlay runtime | `Overlay`, `OverlayView`, `OverlayScene`, `NativeOverlayRenderer`, `OverlayMountOptions`, `OverlayBindingOptions`, `OverlayReadable`, `OverlayStateSource` |
+| Overlay UI | `ui`, `OverlayChild`, `OverlayElement`, `OverlayLayoutProps`, `OverlayFrameProps`, `OverlayTextProps`, `OverlayEllipseProps`, `OverlayDotProps`, `OverlayDividerProps`, `OverlayBadgeProps`, `OverlayAlign`, `OverlayJustify`, `OverlayInsets`, `OverlayLength` |
+| Overlay primitives | `OverlayNode`, `OverlayNodeId`, `OverlayMutation`, `OverlayText`, `OverlayRect`, `OverlayEllipse`, `OverlayLine`, `OverlayFont`, `OverlayStroke`, `OverlayShadow` |
+| Overlay process and window | `OverlayWindowOptions`, `ResolvedOverlayWindowOptions`, `NativeOverlayOptions`, `NativeOverlayReady`, `overlayExecutableFileName`, `resolveOverlayExecutable`, `resolveOverlayWindowOptions` |
+| Native host | `NativeHost`, `NativeHostOptions`, `NativeHostWatcher`, `NativeWatchOptions`, `NativeManifest`, `ProgramDescriptor`, `NativeRuntimeInfo`, `NativeStateManifestEntry`, `NativeStateSnapshot` |
+| Native capabilities | `NativeCapability`, `NativePermission`, `NATIVE_ABI_VERSION`, `inspectNativeRuntime`, `loadProgramDescriptor`, `nativeLibraryFileName`, `resolveNativeLibrary` |
+| Compiler | `compileSource`, `SpellwireCompileError`, `CompileDiagnostic`, `CompileOptions`, `CompileResult`, `encodeModule` |
+| Wire format and IR | `Opcode`, `SourceFilter`, `TriggerFlag`, `WIRE_VERSION`, `WIRE_HEADER_SIZE`, `WIRE_HANDLER_SIZE`, `WIRE_INSTRUCTION_SIZE`, `CompiledModule`, `Handler`, `Instruction`, `StateSlot` |
 
 ## Persistent realtime state
 
@@ -441,6 +460,15 @@ host.close();
 
 ## Native host and permissions
 
+Inspect the current native library without starting the host:
+
+```bash
+bun run inspect:runtime
+bun run inspect:runtime -- --request-permissions
+```
+
+The second command requests or refreshes platform permissions. Both print the ABI version, native library path, enabled capability names, and observe/inject permission flags.
+
 ```ts
 const host = await NativeHost.load("macro.spellwire.ts", {
   nativeLibraryPath: "/optional/explicit/library",
@@ -662,7 +690,7 @@ Static trees create no timer. Poll ticks coalesce while a refresh is in flight, 
 | `OverlayWindowOptions` | Default | Native request |
 | --- | --- | --- |
 | `title` | `"Spellwire Overlay"` | Window title, 1–256 characters |
-| `transparent` | `true` | Alpha-capable surface and transparent window |
+| `transparent` | `true` | Request native transparent-window behavior and an alpha-capable surface when the backend supports it |
 | `alwaysOnTop` | `true` | Always-on-top window level |
 | `focusable` | `false` | Whether the overlay may activate/accept focus |
 | `clickThrough` | `true` | Disable pointer hit testing when true |
@@ -689,7 +717,9 @@ const app = await Spellwire.start({
 });
 ```
 
-The ready message exposes the validated, fully default-resolved request as `overlay.renderer.ready.window`. The renderer is a native winit/wgpu process—there is no WebView compatibility layer. `focusable` and `clickThrough` are deliberately separate: a focusable window may still ignore pointer hits, and a non-focusable window may receive pointer hits. macOS uses the prohibited activation policy when non-focusable and the accessory policy when focusable; Windows disables the native window when non-focusable; Linux uses the available winit/compositor hints. No cross-platform library can promise identical focus/topmost behavior across every X11/Wayland compositor, so verify the intended Linux desktop.
+The ready message exposes the validated, fully default-resolved request as `overlay.renderer.ready.window`; `overlay.renderer.ready.alphaMode` reports the surface mode selected by wgpu. The renderer is a native winit/wgpu process with no WebView layer. `focusable` and `clickThrough` are separate: a focusable window may ignore pointer hits, and a non-focusable window may receive them. macOS uses the prohibited activation policy when non-focusable and the accessory policy when focusable; Windows disables the native window when non-focusable; Linux uses the available winit/compositor hints.
+
+Windows lifecycle and window-policy smoke tests pass, but current wgpu backends may report `alphaMode: "Opaque"`; the policy result alone does not prove per-pixel visual transparency. Verify transparency visually on the target Windows desktop. Focus, topmost, click-through, and transparency behavior can also vary across X11/Wayland compositors, so Linux requires a target-desktop check.
 
 Initial monitor and size remain the primary monitor's full bounds; monitor routing and explicit window geometry are not yet public. On Windows, `focusable: false` also makes the window non-interactive. Set `focusable: true` for an interactive decorated tool window.
 

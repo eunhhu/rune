@@ -10,7 +10,7 @@ cd my-automation
 bun run start
 ```
 
-생성된 프로젝트는 세 가지 작업만 노출합니다.
+생성된 프로젝트는 세 명령을 사용합니다.
 
 ```bash
 bun run start  # 한 번 실행

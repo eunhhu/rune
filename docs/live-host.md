@@ -27,7 +27,7 @@ cd my-automation
 bun run start
 ```
 
-The generated project has exactly three scripts:
+The generated project uses three scripts:
 
 | Script | Result |
 | --- | --- |
@@ -63,15 +63,15 @@ Linux:   target/release/libspellwire_native.so
          target/release/spellwire-overlay
 ```
 
-Normal `run`/`watch` commands prepare permissions automatically. For platform diagnostics, the source CLI still exposes this advanced status command:
+Normal `run`/`watch` commands prepare permissions automatically. From a source checkout, inspect the current native runtime with:
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
-A fully ready host prints `observe: granted` and `inject: granted`. ABI `4` is expected. Windows/macOS report capabilities `0x77`; Linux reports `0x37` because original-input suppression is pending there. Platform-specific caveats still apply: Windows UIPI is target-specific, macOS has two privacy grants, and Linux requires device-file access.
+A ready host reports `permissions.observe: true` and `permissions.inject: true`. ABI `4` is expected. Windows/macOS report capability mask `0x77`; Linux reports `0x37` because original-input suppression is pending there. Windows UIPI is target-specific, macOS has two privacy grants, and Linux requires device-file access.
 
-## Three CLI workflows
+## CLI commands
 
 ### 1. Compile and simulate first
 
@@ -122,7 +122,7 @@ bun packages/spellwire/src/cli.ts watch macro.spellwire.ts
 
 Every accepted source change prints `reloaded`. A rejected edit prints `reload failed: ...`; the process stays alive so you can correct the file. Reloads are serialized, so several rapid file events cannot mutate the host concurrently.
 
-### 4. Run a compiled binary
+### Run a compiled binary
 
 The default manifest is `<binary>.json`:
 
@@ -354,8 +354,8 @@ Use `InputSource.Any` only when recursion is intentional and bounded by state or
 | --- | --- | --- |
 | `Spellwire native library not found` | No matching library in discovery paths | Run `bun run build:native`, then check `--library` or `SPELLWIRE_NATIVE_LIBRARY` |
 | `native ABI ... is incompatible` | JS wrapper and native library are from different builds | Rebuild both from the same commit; remove stale path overrides |
-| `observe: missing` | Global observer cannot open | Grant Input Monitoring on macOS or evdev access on Linux |
-| `inject: missing` | Injector cannot open | Grant Accessibility on macOS or `/dev/uinput` write access on Linux |
+| `missing global input permission: observation` | Global observer cannot open | Grant Input Monitoring on macOS or evdev access on Linux |
+| `missing global input permission: injection` | Injector cannot open | Grant Accessibility on macOS or `/dev/uinput` write access on Linux |
 | `status -9` | Platform hook, event tap, device, or injection failed | Read the appended native error and follow [Platform Verification](platform-verification.md) |
 | `status -10` | Native worker channel failed | Stop/close the host and reproduce with logs |
 | `status -11` | Delayed-continuation capacity exhausted | Reduce overlapping delayed handlers or raise the native limit in a custom build |

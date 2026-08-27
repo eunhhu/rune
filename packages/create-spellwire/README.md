@@ -10,7 +10,7 @@ cd my-automation
 bun run start
 ```
 
-Generated projects expose only three workflows:
+Generated projects use three commands:
 
 ```bash
 bun run start  # run once

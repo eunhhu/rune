@@ -4,14 +4,14 @@
 
 Use this guide on every release target. It distinguishes source checks, native OS loopback, submission timing, overlay startup, and physical end-to-end latency. Passing one layer does not prove the next.
 
-Generated projects do not require a separate permission workflow: `bun run start` and `bun run watch` prepare permissions automatically. This release checklist uses the hidden-compatible `permissions` diagnostic command only because verification needs the raw ABI, capability, and permission values.
+Generated projects do not require a separate permission workflow: `bun run start` and `bun run watch` prepare permissions automatically. Repository verification uses `bun run inspect:runtime` to print the ABI, capabilities, native library path, and current permission flags.
 
 ## What each check proves
 
 | Check | What it proves | What it does not prove |
 | --- | --- | --- |
 | `bun run check` | TypeScript/Rust compilation, tests, formatting, Clippy | Device permissions or live OS behavior |
-| `permissions` | Native library loads; current process can query/open required resources | Windows injection into every integrity level |
+| `inspect:runtime` | Native library loads; current process can query/open required resources | Windows injection into every integrity level |
 | `test:platform-loopback` | VM output reaches OS injection, returns through global observation, keeps synthetic classification, and updates VM state | Physical keyboard latency or target-application receipt |
 | `bench:platform` | Time until the native OS submission call returns | Device delivery, compositor, application polling |
 | overlay `--smoke` | Window, GPU surface, transparency mode, and event loop initialize | Appearance on every compositor or multi-monitor layout |
@@ -46,7 +46,7 @@ The loopback test injects global synthetic F20 events. It does not type text or 
 Run:
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions --request
+bun run inspect:runtime -- --request-permissions
 ```
 
 macOS may open or update two entries:
@@ -59,17 +59,18 @@ Grant the permissions to the application that actually launches Bun. That may be
 Recheck without prompting:
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
 Expected shape:
 
-```text
-library: /.../target/release/libspellwire_native.dylib
-ABI: 4
-capabilities: 0x77
-observe: granted
-inject: granted
+```json
+{
+  "abiVersion": 4,
+  "nativeLibraryPath": "/.../target/release/libspellwire_native.dylib",
+  "capabilities": { "mask": "0x77", "enabled": ["..."] },
+  "permissions": { "mask": "0x3", "observe": true, "inject": true }
+}
 ```
 
 ### 2. Run native loopback
@@ -108,7 +109,7 @@ Expected fields:
 bun run bench:platform -- 10000
 ```
 
-The command reports p50, p95, p99, p999, and maximum nanoseconds for zero-delta mouse batches. It measures the return of `CGEventPost` submission work only. Do not present it as physical switch-to-application latency.
+The command reports p50, p95, p99, p999, and maximum nanoseconds for zero-delta mouse batches. It measures the return of `CGEventPost` submission work, not physical switch-to-application latency.
 
 ### 5. Start the overlay smoke test
 
@@ -134,7 +135,7 @@ Use a normal PowerShell window first. Build and query the runtime:
 bun install --frozen-lockfile
 bun run check
 bun run build:native
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
 Expected library suffix is `target\release\spellwire_native.dll`, ABI is `4`, and capabilities are `0x77`. Windows currently reports both permission bits as granted because low-level hooks and `SendInput` have no preflight prompt.
@@ -158,6 +159,8 @@ Expected loopback fields:
 
 On Windows arm64, `arch` should be `arm64`. If loopback works in a normal app but not an elevated app, that is expected UIPI behavior rather than a mapping failure.
 
+Run these checks from an interactive desktop session. SSH services commonly run in Session 0, where `SendInput` can fail with `ACCESS_DENIED`; that result does not represent the signed-in desktop session. The current x64 Windows record passes the full source check, release build, loopback/reload, default and custom window-policy smoke, live overlay update, package dry-run, and submission benchmark in an interactive session. Physical consuming-hotkey suppression and visual per-pixel transparency remain manual checks.
+
 ## Linux verification
 
 The Linux backend reads evdev and creates one uinput device. These interfaces expose global input and therefore require deliberately granted device access.
@@ -166,10 +169,10 @@ The Linux backend reads evdev and creates one uinput device. These interfaces ex
 
 ```bash
 ls -l /dev/input/event* /dev/uinput
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
-`observe: granted` means at least one readable evdev device was discovered. `inject: granted` means `/dev/uinput` opened successfully. `permissions --request` does not install rules or display a prompt on Linux; it only rechecks the same resources.
+`observe: true` means at least one readable evdev device was discovered. `inject: true` means `/dev/uinput` opened successfully. `inspect:runtime -- --request-permissions` does not install rules or display a prompt on Linux; it only rechecks the same resources.
 
 ABI should be `4` and capabilities should be `0x37`. Linux original-input suppression is not implemented; do not expect `consume` to hide the source event in this target-machine run.
 
@@ -194,7 +197,7 @@ Log out and back in, or reconnect the relevant device, if access does not update
 Recheck:
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
 ### 3. Run loopback and benchmark
@@ -264,12 +267,12 @@ Physical latency needs a separate measurement path, such as an externally timest
 | Failure | Likely cause | Next check |
 | --- | --- | --- |
 | Native library not found | Native build missing or wrong architecture | Confirm file name under `target/release`; remove stale path overrides |
-| ABI mismatch | JS and native artifacts came from different commits | Rebuild from one checkout and rerun `permissions` |
-| macOS `observe: missing` | Input Monitoring not granted to launcher | Check the correct app entry, quit it fully, reopen |
-| macOS `inject: missing` | Accessibility not granted to launcher | Check Accessibility, then restart launcher |
+| ABI mismatch | JS and native artifacts came from different commits | Rebuild from one checkout and rerun `bun run inspect:runtime` |
+| macOS `permissions.observe: false` | Input Monitoring not granted to launcher | Check the correct app entry, quit it fully, reopen |
+| macOS `permissions.inject: false` | Accessibility not granted to launcher | Check Accessibility, then restart launcher |
 | Windows loopback timeout | Hook setup failed, session boundary, or integrity mismatch | Test in a normal local desktop session at matching integrity |
-| Linux `observe: missing` | No readable `/dev/input/event*` device | Inspect ownership/ACL and active-seat udev application |
-| Linux `inject: missing` | `/dev/uinput` absent or not writable | Load/enable uinput as appropriate for the distribution; inspect ACL |
+| Linux `permissions.observe: false` | No readable `/dev/input/event*` device | Inspect ownership/ACL and active-seat udev application |
+| Linux `permissions.inject: false` | `/dev/uinput` absent or not writable | Load/enable uinput as appropriate for the distribution; inspect ACL |
 | Linux loopback timeout after injection | Virtual device registration/ACL delay | Inspect `/sys/class/input/*/device/name` and udev events |
 | Overlay exits before ready | No GPU adapter/surface or no graphical session | Check stderr, session variables, drivers, remote/headless status |
 | Overlay is not topmost on Wayland | Compositor policy lacks required semantics | Record compositor; evaluate compositor-specific layer-shell integration |
@@ -287,12 +290,7 @@ Physical or virtual machine:
 Bun version:
 Rust version:
 
-Permission output:
-  library:
-  ABI:
-  capabilities:
-  observe:
-  inject:
+Runtime info JSON:
 
 Loopback JSON:
 

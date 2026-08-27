@@ -25,7 +25,7 @@ cd my-automation
 bun run start
 ```
 
-생성된 프로젝트는 다음 세 script만 제공합니다.
+생성된 프로젝트는 다음 세 script를 사용합니다.
 
 | Script | 결과 |
 | --- | --- |
@@ -57,15 +57,15 @@ Linux:   target/release/libspellwire_native.so
          target/release/spellwire-overlay
 ```
 
-`run`과 `watch`는 일반 사용에 필요한 권한을 자동 준비합니다. raw ABI/capability/permission 값을 확인해야 하는 플랫폼 진단에서는 다음 고급 명령을 사용할 수 있습니다.
+`run`과 `watch`는 일반 사용에 필요한 권한을 자동 준비합니다. source checkout에서 현재 native runtime을 확인하려면 다음 명령을 사용합니다.
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
-현재 소스에서는 ABI `4`, `observe: granted`, `inject: granted`가 정상입니다. Windows/macOS capabilities는 `0x77`, 원본 입력 차단이 아직 없는 Linux는 `0x37`입니다. Windows UIPI는 대상 process에 따라 달라지고, macOS는 두 privacy grant가 필요하며, Linux는 device file 접근 권한이 필요합니다.
+정상 상태는 ABI `4`, `permissions.observe: true`, `permissions.inject: true`입니다. Windows/macOS capability mask는 `0x77`, 원본 입력 차단이 아직 없는 Linux는 `0x37`입니다. Windows UIPI는 대상 process에 따라 달라지고, macOS는 두 privacy grant가 필요하며, Linux는 device file 접근 권한이 필요합니다.
 
-## CLI의 세 workflow
+## CLI 명령
 
 ### 1. AOT binary 만들기
 
@@ -336,8 +336,8 @@ rt.onKeyDown(
 | --- | --- | --- |
 | `Spellwire native library not found` | 현재 OS/CPU에 맞는 library를 찾지 못함 | package 재설치 또는 source에서 `bun run build:native`; stale override 확인 |
 | `native ABI ... is incompatible` | JS wrapper와 native library가 다른 build | 같은 commit에서 다시 빌드하고 override 제거 |
-| observation permission 누락 | global observer를 열 수 없음 | macOS Input Monitoring 또는 Linux evdev 접근 허용 |
-| injection permission 누락 | injector를 열 수 없음 | macOS Accessibility 또는 Linux `/dev/uinput` write 허용 |
+| `missing global input permission: observation` | global observer를 열 수 없음 | macOS Input Monitoring 또는 Linux evdev 접근 허용 |
+| `missing global input permission: injection` | injector를 열 수 없음 | macOS Accessibility 또는 Linux `/dev/uinput` write 허용 |
 | `status -9` | platform hook, event tap, device, injection 실패 | 뒤에 붙은 native error와 [플랫폼 검증](platform-verification.ko.md) 확인 |
 | `status -10` | native worker channel 실패 | host stop/close 후 로그와 함께 재현 |
 | `status -11` | delayed continuation capacity 소진 | 동시에 겹치는 delayed handler 감소 또는 custom limit 조정 |

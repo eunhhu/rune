@@ -22,7 +22,7 @@ rt.hotkey("Ctrl+Q", () => {
 rt.remap("CapsLock", "Escape", { when: () => enabled });
 ```
 
-CLI는 세 가지 일반 작업만 제공합니다.
+CLI 명령은 다음 세 가지입니다.
 
 ```bash
 bunx spellwire run macro.spellwire.ts

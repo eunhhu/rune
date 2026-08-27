@@ -2,11 +2,9 @@
 
 [한국어](automation.ko.md)
 
-Spellwire's realtime input plane is designed for native latency and a small authoring surface. Modifier hotkeys, release hotkeys, one-key remaps, repeat policy, original-input suppression, and boolean state gates compile before the host starts. No JavaScript callback runs in an OS hook.
+Spellwire compiles modifier hotkeys, release hotkeys, one-key remaps, repeat policy, original-input suppression, and boolean state gates before the host starts. No JavaScript callback runs in an OS hook. The [AutoHotkey migration matrix](#autohotkey-migration-status) lists both supported and pending automation areas.
 
-> Spellwire is not yet a complete AutoHotkey replacement. Native hotstrings, arbitrary non-modifier combinations, Unicode text sending, window/control automation, clipboard/process helpers, and image/pixel search remain explicit gaps. See [AutoHotkey migration status](#autohotkey-migration-status).
-
-## Small complete example
+## Example
 
 ```ts
 import { Key, rt, tapKey } from "spellwire";
@@ -197,7 +195,7 @@ On supported backends, the hook path contains:
 
 There is no JavaScript call, IPC, heap allocation, mutex, state-expression evaluation, or overlay work in that path. Queue slots are allocated once at host startup; a 100,000-event test exercises bounded overflow, wake-up, ordering, disconnection, and ring-slot wraparound reuse. A consume table is rebuilt on the worker only when a referenced `when` state changes or a program reload succeeds. If the input queue is full, Spellwire passes new original events, atomically marks recovery, drops the stale backlog, clears pending continuations/input latches, and asks the backend to release every tracked synthetic down. Overload can lose automation actions, but Spellwire does not intentionally swallow an event it could not admit; any backend release failure is retained in `lastError()`.
 
-On the development macOS arm64 machine, three warm 1,000,000-sample core runs were compared with a detached baseline worktree at commit `3fe4256`. Both baseline and this change measured p50/p95 `42 ns`, p99 `42–83 ns`, and p999 `84–125 ns`. This shows no measurable regression at the benchmark's clock resolution; it is not a physical switch-to-application latency claim.
+`bun run bench` measures trigger lookup, VM execution, and null injection. `bun run bench:platform -- 10000` measures the return time of the OS submission call. Compare percentile results only on equivalent hardware, OS, power state, and load; neither benchmark measures a physical switch or target-application receipt.
 
 ## AutoHotkey migration status
 
@@ -231,7 +229,7 @@ rt.hotkey("Ctrl+Shift+K", () => tapKey(Key.Enter));
 rt.remap("CapsLock", "Escape");
 ```
 
-Do not describe Spellwire as an AutoHotkey superset until the missing rows are implemented and target-machine behavior is verified. The architectural target is broader: portable TypeScript control plane, bounded native realtime plane, and retained native UI without putting general-purpose runtime work in the input hook.
+The implemented rows combine a portable TypeScript control plane, bounded native realtime plane, and retained native UI. The remaining rows are the current compatibility gaps.
 
 Primary AutoHotkey references: [Hotkeys](https://www.autohotkey.com/docs/v2/Hotkeys.htm), [Hotstrings](https://www.autohotkey.com/docs/v2/Hotstrings.htm), [#HotIf](https://www.autohotkey.com/docs/v2/lib/_HotIf.htm), and [Send](https://www.autohotkey.com/docs/v2/lib/Send.htm).
 
@@ -248,4 +246,4 @@ bun run check
 
 The consume smoke first proves its CoreGraphics tail probe sees two unblocked transitions, then verifies an inactive `when` gate still forwards both. After enabling the native gate, the VM handler runs once while zero transitions reach the tail probe.
 
-Use [Platform Verification](platform-verification.md) for Windows and Linux target-machine reports.
+[Platform Verification](platform-verification.md) contains the current Windows interactive-session record and the remaining physical Windows/Linux checks.

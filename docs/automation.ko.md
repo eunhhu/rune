@@ -2,11 +2,9 @@
 
 [English](automation.md)
 
-Spellwire realtime 입력 계층은 native latency와 작은 authoring surface를 목표로 합니다. modifier hotkey, release hotkey, 단일 키 remap, repeat 정책, 원본 입력 차단, boolean 상태 gate를 host 시작 전에 compile합니다. OS hook에서 JavaScript callback을 실행하지 않습니다.
+Spellwire는 modifier hotkey, release hotkey, 단일 키 remap, repeat 정책, 원본 입력 차단, boolean 상태 gate를 host 시작 전에 compile합니다. OS hook에서는 JavaScript callback을 실행하지 않습니다. [AutoHotkey 마이그레이션 matrix](#autohotkey-마이그레이션-상태)에 지원 영역과 미구현 영역을 함께 정리했습니다.
 
-> 아직 AutoHotkey 전체 대체재는 아닙니다. native hotstring, 임의의 비-modifier 조합, Unicode text 전송, window/control 자동화, clipboard/process helper, image/pixel search는 명시적인 미구현 영역입니다. [AutoHotkey 마이그레이션 상태](#autohotkey-마이그레이션-상태)를 먼저 확인하십시오.
-
-## 작지만 완전한 예제
+## 예제
 
 ```ts
 import { Key, rt, tapKey } from "spellwire";
@@ -197,7 +195,7 @@ Windows와 macOS는 `NativeInputSuppression`을 advertise합니다. Linux는 현
 
 이 경로에는 JavaScript call, IPC, heap allocation, mutex, 상태식 평가, overlay 작업이 없습니다. queue slot은 host 시작 시 한 번만 할당합니다. 100,000-event test가 bounded overflow, wake-up, 순서, disconnect, ring-slot wraparound 재사용을 검증합니다. consume table은 참조 중인 `when` state가 바뀌거나 program reload가 성공할 때만 worker에서 갱신됩니다. input queue가 가득 차면 새 원본 event를 통과시키고 recovery를 atomic하게 표시한 뒤 stale backlog, pending continuation, input latch를 비우고 추적 중인 synthetic down을 전부 해제하도록 backend에 요청합니다. overload에서는 automation action이 유실될 수 있지만 수락하지 못한 event를 의도적으로 삼키지 않으며, backend release 실패는 `lastError()`에 남깁니다.
 
-개발 macOS arm64 장비에서 warm 1,000,000-sample core run을 commit `3fe4256`의 detached baseline worktree와 각각 3회 비교했습니다. baseline과 이번 변경 모두 p50/p95 `42 ns`, p99 `42–83 ns`, p999 `84–125 ns`였습니다. benchmark clock resolution 안에서 측정 가능한 regression이 없다는 뜻이며 물리 switch-to-application latency 주장은 아닙니다.
+`bun run bench`는 trigger lookup, VM execution, null injection을 측정합니다. `bun run bench:platform -- 10000`은 OS submission call의 반환 시간을 측정합니다. percentile은 같은 hardware, OS, power state, load에서 비교해야 하며 두 benchmark 모두 물리 switch나 target application 수신은 측정하지 않습니다.
 
 ## AutoHotkey 마이그레이션 상태
 
@@ -231,7 +229,7 @@ rt.hotkey("Ctrl+Shift+K", () => tapKey(Key.Enter));
 rt.remap("CapsLock", "Escape");
 ```
 
-표의 미구현 행과 대상 장비 검증이 끝나기 전에는 Spellwire를 AutoHotkey superset이라고 설명하면 안 됩니다. 목표 architecture는 더 넓습니다. portable TypeScript control plane, bounded native realtime plane, retained native UI를 제공하면서 input hook에 general-purpose runtime 작업을 넣지 않는 것입니다.
+구현된 영역은 portable TypeScript control plane, bounded native realtime plane, retained native UI를 결합합니다. 나머지 행은 현재 compatibility gap입니다.
 
 AutoHotkey primary reference: [Hotkeys](https://www.autohotkey.com/docs/v2/Hotkeys.htm), [Hotstrings](https://www.autohotkey.com/docs/v2/Hotstrings.htm), [#HotIf](https://www.autohotkey.com/docs/v2/lib/_HotIf.htm), [Send](https://www.autohotkey.com/docs/v2/lib/Send.htm).
 
@@ -248,4 +246,4 @@ bun run check
 
 consume smoke는 먼저 CoreGraphics tail probe가 차단되지 않은 transition 2개를 보는지 확인합니다. 그다음 비활성 `when` gate에서도 2개가 통과하는지 검증합니다. native gate를 활성화하면 VM handler는 1회 실행되고 tail probe에는 transition 0개가 도착해야 합니다.
 
-Windows와 Linux 대상 장비 결과는 [플랫폼 검증](platform-verification.ko.md)에 따라 기록하십시오.
+[플랫폼 검증](platform-verification.ko.md)에서 현재 Windows 대화형 session 결과와 남은 Windows/Linux 물리 검증 절차를 확인할 수 있습니다.

@@ -4,7 +4,7 @@
 
 Spellwire는 Bun과 TypeScript를 사용하는 상태 기반 실시간 입력 자동화 런타임입니다. 분석 가능한 입력 핸들러를 입력 이벤트마다 JavaScript로 호출하지 않고, 미리 제한된 네이티브 바이트코드로 컴파일하여 실행합니다.
 
-> 초기 알파 버전입니다. TypeScript AOT 컴파일러, 제한형 네이티브 VM, lock-free 입력 차단 hotkey/remap, 상태 gate, 비차단 지연 스케줄러, Bun FFI 호스트, Windows/macOS/Linux 입력 백엔드, 공유 동적 입력 lane, retained-mode 네이티브 오버레이가 구현되어 있습니다. macOS는 실제 루프백과 입력 차단 검증을 마쳤고 Windows와 Linux는 실제 장비 검증이 남아 있습니다.
+> 초기 알파 버전입니다. TypeScript AOT 컴파일러, 제한형 네이티브 VM, lock-free 입력 차단 hotkey/remap, 상태 gate, 비차단 지연 스케줄러, Bun FFI 호스트, Windows/macOS/Linux 입력 백엔드, 공유 동적 입력 lane, retained-mode 네이티브 오버레이가 구현되어 있습니다. macOS는 실제 루프백과 입력 차단 검증을 마쳤습니다. Windows는 대화형 세션에서 루프백, 입력 주입, reload, overlay lifecycle을 검증했으며 물리 입력 차단과 시각적 투명도 검증이 남아 있습니다. Linux는 대상 장비 검증이 남아 있습니다.
 
 ## 가장 빠르게 시작하기
 
@@ -14,7 +14,7 @@ cd my-automation
 bun run start
 ```
 
-생성된 프로젝트에는 다음 세 명령만 있습니다.
+생성된 프로젝트는 다음 세 명령을 사용합니다.
 
 ```bash
 bun run start  # 메모리에서 컴파일한 뒤 바로 실행
@@ -42,7 +42,7 @@ bun run build  # dist/main.spellwire.bin과 manifest 생성
 | UI style | `width`, `height`, `padding`, `gap`, `fill`, `stroke`, `shadow`, `opacity`, font prop |
 | Overlay window | `overlayOptions.window` (`alwaysOnTop`, `transparent`, `focusable`, `clickThrough` 등) |
 
-signature, 기본값, option 표, 완전한 state-to-overlay 앱, native window 정책과 플랫폼 caveat는 **[한 페이지 API 레퍼런스](docs/api.ko.md)**에서 모두 찾을 수 있습니다. 일반 API를 찾기 위해 자동화와 overlay 문서를 오갈 필요가 없습니다.
+signature, 기본값, option 표, 완전한 state-to-overlay 앱, native window 정책과 플랫폼별 주의점은 **[API 레퍼런스](docs/api.ko.md)**에서 확인할 수 있습니다.
 
 첫 npm 배포 이후 기존 프로젝트에 직접 설치하려면 다음 명령을 사용합니다.
 
@@ -77,7 +77,7 @@ portable 문자열이 modifier 보일러플레이트를 없애고, `when`이 act
 
 ## 빌드
 
-생성된 프로젝트에서는 다음 명령만 실행하면 됩니다.
+생성된 프로젝트에서는 다음 명령을 실행합니다.
 
 ```bash
 bun run build
@@ -125,10 +125,10 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 | 네이티브 inspector/simulator | 구현 완료 |
 | 명시적 dispatch 및 owned-host C ABI | 구현 완료 |
 | Bun FFI 호스트, 명명 상태, watch/reload, SPSC lane | 구현 완료 |
-| Windows `SendInput`, macOS `CGEventPost`, Linux evdev/uinput | 구현 완료, macOS 실제 검증 완료 |
-| 상태 기반 auto-layout overlay, modern style, configurable native window 정책, retained dirty update | 구현 완료, macOS 실제 검증 완료 |
+| Windows `SendInput`, macOS `CGEventPost`, Linux evdev/uinput | 구현 완료, macOS 실제 검증 완료, Windows 대화형 루프백 검증 완료, Windows 물리 입력 차단과 Linux 대상 실행은 미검증 |
+| 상태 기반 auto-layout overlay, modern style, configurable native window 정책, retained dirty update | 구현 완료, macOS와 Windows lifecycle/window-policy smoke 검증 완료, Windows 시각적 투명도와 Linux compositor 검증은 미완료 |
 | 플랫폼별 prebuilt/signing workflow | 구현 완료, 배포 자격 증명 필요 |
-| 물리 입력부터 대상 앱까지의 마이크로초 지연 보장 | 주장하지 않음 |
+| 물리 입력부터 대상 앱까지의 지연 | 미측정 |
 
 ## 패키지와 crate
 
@@ -138,7 +138,7 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 | `create-spellwire` | `bun create spellwire` 프로젝트 생성기 |
 | `spellwire-core` | 바이트코드 decoder, trigger table, 영속 상태 VM, scheduler |
 | `spellwire-native` | 안정 C ABI, owned host, 전역 observer와 injector |
-| `spellwire-overlay` | winit/wgpu 기반 투명 retained renderer process |
+| `spellwire-overlay` | winit/wgpu 기반 네이티브 retained renderer process |
 | `spellwire-cli` / `spellwire-sim` | 네이티브 inspector와 결정적 simulator |
 | `spellwire-bench` | 네이티브 dispatch percentile benchmark |
 
@@ -146,7 +146,7 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 
 여기서 시작:
 
-- **[한 페이지 API 레퍼런스](docs/api.ko.md)** — 생성/실행/빌드, hotkey, 상태, 출력, 수명 주기, 전체 overlay API, 기본값, 한계를 검색 가능한 한 페이지로 제공
+- **[API 레퍼런스](docs/api.ko.md)** — 생성/실행/빌드, hotkey, 상태, 출력, 수명 주기, overlay API, 기본값과 한계
 - [빠른 시작](docs/quick-start.ko.md) — 첫 프로젝트와 첫 live run
 - [문제 해결](docs/troubleshooting.ko.md) — 오류와 플랫폼 설정
 - [플랫폼 검증](docs/platform-verification.ko.md) — macOS, Windows, Linux 복사 가능 검증 절차

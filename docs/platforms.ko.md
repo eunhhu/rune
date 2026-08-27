@@ -13,10 +13,10 @@
 | 원본 입력 차단 | hook이 nonzero 반환 | event tap이 null 반환 | 미구현 |
 | physical/synthetic 분류 | injection tag | injection tag | virtual-device identity |
 | keyboard/mouse/button/wheel | 지원 | 지원 | 지원 |
-| transparent retained overlay | winit/wgpu | accessory-policy winit/wgpu | winit/wgpu, compositor 의존 |
-| 실제 local 검증 | 대기 | arm64 loopback + suppression 통과 | 대기 |
+| retained overlay | winit/wgpu, 시각적 transparency 검증 대기 | accessory-policy winit/wgpu | winit/wgpu, compositor 의존 |
+| 실제 검증 | 대화형 loopback, reload, dynamic lane, window policy, live overlay update 통과 | arm64 loopback + suppression 통과 | 대기 |
 
-Windows/Linux는 unit/mapping test와 macOS에서의 x86_64 cross-target Clippy를 통과했습니다. release artifact를 검증 완료로 취급하기 전에 대상 장비에서 [플랫폼 검증](platform-verification.ko.md)을 실행하십시오.
+Windows x64는 대화형 desktop session에서 대상 검증을 통과했고 물리 suppression과 시각적 transparency 수동 검증이 남아 있습니다. Linux는 unit/mapping과 cross-target source gate를 통과했으며 실제 device/display 검증이 남아 있습니다.
 
 Windows/macOS suppression은 lock-free trigger table과 paired down/repeat/up tracking을 사용합니다. Linux는 evdev event를 읽고 버리는 것만으로 특정 입력을 안전하게 차단할 수 없습니다. 각 물리 device를 exclusive grab하고 consume하지 않은 모든 capability를 virtual device로 relay해야 합니다. 전체 relay가 아직 없으므로 Linux는 `NativeInputSuppression`을 advertise하지 않으며 `consume`을 사용해도 원본 입력은 앱에 전달됩니다.
 
@@ -31,8 +31,8 @@ Windows/macOS suppression은 lock-free trigger table과 paired down/repeat/up tr
 observation은 Input Monitoring, injection은 Accessibility가 필요합니다. `spellwire run`과 `spellwire watch`는 두 권한을 자동 확인/요청합니다. raw 상태 진단:
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions
-bun packages/spellwire/src/cli.ts permissions --request
+bun run inspect:runtime
+bun run inspect:runtime -- --request-permissions
 ```
 
 privacy 설정을 바꾼 뒤 기존 process가 갱신되지 않으면 terminal/application을 완전히 재시작하십시오.
@@ -46,11 +46,12 @@ privacy 설정을 바꾼 뒤 기존 process가 갱신되지 않으면 terminal/a
 ```bash
 bun install --frozen-lockfile
 bun run build:native
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 bun run test:platform-loopback
 bun run test:consume-macos # macOS only
 bun run bench:platform -- 10000
 target/release/spellwire-overlay --smoke
+bun run test:overlay-live
 ```
 
 loopback은 tagged synthetic F20을 실제 platform injector로 보내고 global backend로 관찰한 뒤 synthetic-source VM handler가 named state를 갱신하는지 확인합니다.
@@ -65,6 +66,6 @@ Windows overlay는 `target/release/spellwire-overlay.exe`입니다. Linux는 evd
 
 ## Overlay window semantics
 
-native renderer는 `transparent`, `alwaysOnTop`, `focusable`, `clickThrough`, `decorations`, `resizable`, 초기 `visible` option을 받습니다. overlay용 안전 기본값은 transparent, topmost, non-focusable, click-through, borderless, fixed-size, visible입니다. rendering은 input worker와 격리됩니다.
+native renderer는 `transparent`, `alwaysOnTop`, `focusable`, `clickThrough`, `decorations`, `resizable`, 초기 `visible` option을 받습니다. overlay 기본값은 transparency, topmost, non-focusable, click-through, borderless, fixed-size, visible 동작을 요청합니다. rendering은 input worker와 격리됩니다.
 
-macOS는 `focusable`이 false이면 prohibited activation policy, true이면 accessory policy를 사용합니다. Windows는 `focusable`이 false이면 native window를 disable합니다. Linux는 display server/compositor에 의존합니다. winit을 통한 universal Wayland always-on-top layer-shell/focus contract가 없으므로 GNOME/KDE/wlroots 대상 환경마다 검증해야 합니다. primary monitor 선택과 full-monitor 시작 geometry는 현재 고정입니다.
+macOS는 `focusable`이 false이면 prohibited activation policy, true이면 accessory policy를 사용합니다. Windows는 `focusable`이 false이면 native window를 disable합니다. Windows window-policy와 live-update smoke test는 통과했지만 ready message가 `alphaMode: "Opaque"`이면 per-pixel 투명도를 직접 확인해야 합니다. Linux는 display server/compositor에 의존합니다. winit을 통한 universal Wayland always-on-top layer-shell/focus contract가 없으므로 GNOME/KDE/wlroots 대상 환경마다 검증해야 합니다. primary monitor 선택과 full-monitor 시작 geometry는 현재 고정입니다.

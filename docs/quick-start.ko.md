@@ -4,7 +4,7 @@
 
 Spellwire는 기존 Bun 프로젝트에 설치하거나 소스 저장소에서 직접 시험할 수 있습니다. 현재 알파는 결정적 simulator와 실제 전역 입력 native host를 모두 제공합니다.
 
-처음이라면 compiler와 simulator 단계를 먼저 끝낸 뒤 전역 입력을 켜는 것이 안전합니다. live host의 모든 옵션은 [라이브 네이티브 호스트](live-host.ko.md), OS별 권한과 검증은 [플랫폼 검증](platform-verification.ko.md)을 참고하십시오.
+전역 입력을 켜기 전에 compiler와 simulator로 예제를 확인합니다. lifecycle option은 [라이브 네이티브 호스트](live-host.ko.md), OS별 권한과 검증은 [플랫폼 검증](platform-verification.ko.md)에서 설명합니다.
 
 ## 가장 간단한 설치
 
@@ -205,6 +205,7 @@ bun packages/spellwire/src/cli.ts watch macro.spellwire.ts
 bun run test:platform-loopback
 bun run bench:platform -- 10000
 target/release/spellwire-overlay --smoke
+bun run test:overlay-live
 ```
 
 Windows overlay 파일은 `target/release/spellwire-overlay.exe`입니다. Linux overlay는 활성 graphical session이 필요합니다. `bench:platform`은 OS submission call의 반환 시간만 측정하며 물리 입력부터 target application까지의 지연이 아닙니다.
@@ -225,6 +226,10 @@ cargo clippy --workspace --all-targets --locked
 ```
 
 영구 GitHub workflow는 Linux, macOS, Windows에서 Rust test/build를 반복하고 Rust 1.81, npm tarball, compiler → wire format → simulator smoke path를 확인합니다.
+
+## 플랫폼 검증 상태
+
+macOS arm64는 permission, loopback, suppression, dynamic lane, overlay, submission benchmark를 검증했습니다. Windows x64는 대화형 세션에서 source, build, loopback/reload, dynamic lane, overlay lifecycle/window policy, package, benchmark를 검증했으며 물리 suppression과 시각적 transparency 확인이 남아 있습니다. Linux는 source coverage가 있고 실제 device와 graphical session 검증이 남아 있습니다. 자세한 상태는 [플랫폼 상태](platforms.ko.md)를 참고하십시오.
 
 ## 다음 문서
 

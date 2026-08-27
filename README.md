@@ -4,7 +4,7 @@
 
 Spellwire is a stateful realtime input-automation runtime for Bun and TypeScript. Analyzable input handlers are compiled ahead of time into bounded native bytecode instead of invoking JavaScript for every input event.
 
-> Early alpha. The TypeScript AOT compiler, bounded native VM, lock-free consuming hotkeys/remaps, state gates, non-blocking delay scheduler, Bun FFI host, global platform backends, shared dynamic lane, and retained native overlay are implemented. macOS has live loopback and suppression verification; Windows and Linux still need target-machine runs.
+> Early alpha. The TypeScript AOT compiler, bounded native VM, lock-free consuming hotkeys/remaps, state gates, non-blocking delay scheduler, Bun FFI host, global platform backends, shared dynamic lane, and retained native overlay are implemented. macOS has live loopback and suppression verification. Windows has interactive-session loopback, injection, reload, and overlay lifecycle verification; physical suppression and visual transparency checks remain. Linux target verification remains.
 
 ## Install
 
@@ -52,7 +52,7 @@ Generated projects keep realtime handlers and the state-driven modern overlay to
 | UI styling | `width`, `height`, `padding`, `gap`, `fill`, `stroke`, `shadow`, `opacity`, font props |
 | Overlay window | `overlayOptions.window` (`alwaysOnTop`, `transparent`, `focusable`, `clickThrough`, …) |
 
-Use the **[one-page API reference](docs/api.md)** for signatures, defaults, option tables, a complete state-to-overlay application, native window policy, and platform caveats. Normal API lookup does not require moving between separate automation and overlay pages.
+See the **[API reference](docs/api.md)** for signatures, defaults, option tables, a complete state-to-overlay application, native window policy, and platform notes.
 
 ## Stateful realtime TypeScript
 
@@ -117,7 +117,7 @@ bun packages/spellwire/src/cli.ts watch examples/stateful.spellwire.ts
 
 The CLI checks/requests platform permissions before starting. `Ctrl+C` stops the observer/runtime and releases synthetic inputs that remain held.
 
-If this is your first live run, follow [Live Native Host Guide](docs/live-host.md) instead of guessing the lifecycle. It includes complete CLI and programmatic examples, safe shutdown, hot-reload state rules, dynamic input events, and error interpretation. Before testing a release on another machine, use the copyable checklist in [Platform Verification](docs/platform-verification.md).
+[Live Native Host Guide](docs/live-host.md) covers CLI and programmatic examples, safe shutdown, hot-reload state rules, dynamic input events, and error interpretation. Use [Platform Verification](docs/platform-verification.md) when testing a release on another machine.
 
 ## What works today
 
@@ -131,10 +131,10 @@ If this is your first live run, follow [Live Native Host Guide](docs/live-host.m
 | Native inspector/simulator | Implemented |
 | C ABI with explicit and owned-host lifecycle APIs | Implemented |
 | Bun FFI host, named state, watch/reload, and SPSC dynamic lane | Implemented |
-| Windows hooks/`SendInput`, macOS event tap/`CGEventPost`, Linux evdev/uinput | Implemented; macOS live-verified |
-| State-driven auto-layout overlay, modern styling, configurable native window policy, retained dirty updates | Implemented; macOS live-verified |
+| Windows hooks/`SendInput`, macOS event tap/`CGEventPost`, Linux evdev/uinput | Implemented; macOS live-verified; Windows interactive loopback verified; Windows physical suppression and Linux target runs pending |
+| State-driven auto-layout overlay, modern styling, configurable native window policy, retained dirty updates | Implemented; macOS and Windows lifecycle/window-policy smoke verified; Windows visual transparency and Linux compositor checks pending |
 | Cross-platform prebuilt artifact/signing workflow | Implemented; release credentials required |
-| Physical end-to-end microsecond latency claim | Not claimed |
+| Physical end-to-end latency | Not measured |
 
 ## Packages and crates
 
@@ -144,7 +144,7 @@ If this is your first live run, follow [Live Native Host Guide](docs/live-host.m
 | `create-spellwire` | `bun create spellwire` initializer |
 | `spellwire-core` | Bytecode decoder, trigger table, persistent-state VM, scheduler |
 | `spellwire-native` | Stable C ABI, owned host, global observers, and native injectors |
-| `spellwire-overlay` | Transparent retained renderer process using winit/wgpu |
+| `spellwire-overlay` | Native retained renderer process using winit/wgpu |
 | `spellwire-cli` / `spellwire-sim` | Native inspector and deterministic simulator |
 | `spellwire-bench` | Native dispatch percentile benchmark |
 
@@ -152,7 +152,7 @@ If this is your first live run, follow [Live Native Host Guide](docs/live-host.m
 
 Start here:
 
-- **[One-page API reference](docs/api.md)** — create/run/build, hotkeys, state, output, lifecycle, complete overlay API, defaults, and limitations in one searchable page
+- **[API reference](docs/api.md)** — create/run/build, hotkeys, state, output, lifecycle, overlay API, defaults, and limitations
 - [Quick Start](docs/quick-start.md) — first project and first live run
 - [Troubleshooting](docs/troubleshooting.md) — errors and platform setup
 - [Platform Verification Guide](docs/platform-verification.md) — copyable macOS, Windows, and Linux checks

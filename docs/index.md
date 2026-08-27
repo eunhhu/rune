@@ -2,28 +2,26 @@
 
 [한국어](index.ko.md)
 
-Normal use starts with one page. The remaining pages are task guides or implementation deep dives, not required chapters.
+Choose a guide by task.
 
-## Use Spellwire
+## Start
 
-1. **[One-page API reference](api.md)** — copyable complete app; project commands; hotkeys; remaps; state; keyboard/mouse output; `Spellwire.start`; every overlay constructor, property, option, lifecycle method, and current limitation.
-2. **[Quick Start](quick-start.md)** — create a project, simulate safely, then perform the first live run.
-3. **[Troubleshooting](troubleshooting.md)** — find setup, compiler, native host, and overlay errors by message.
-4. **[Platform Verification](platform-verification.md)** — run the macOS, Windows, or Linux acceptance checklist and report exact results.
+- **[Quick Start](quick-start.md)** — create a project, simulate it safely, and perform the first live run.
+- **[API reference](api.md)** — find project commands, realtime input, state, output, lifecycle, and overlay APIs.
+- **[Troubleshooting](troubleshooting.md)** — resolve setup, compiler, native host, and overlay errors by message.
+- **[Platform Verification](platform-verification.md)** — run the macOS, Windows, or Linux acceptance checklist.
 
-The API reference is the normal lookup surface. It intentionally combines automation and overlay APIs so a state-to-screen workflow needs no page change.
+## Topics
 
-## Optional behavior and design detail
-
-| Document | Use it when… |
+| Document | Contents |
 | --- | --- |
-| [Automation semantics](automation.md) | You need suppression rules, state-gate behavior, or the AutoHotkey migration matrix |
-| [Realtime TypeScript](typescript-runtime.md) | You need compiler syntax limits, loops, helpers, or resource budgets |
-| [Overlay design](overlay.md) | You are profiling reconciliation/rendering or studying renderer isolation |
-| [Live native host](live-host.md) | You need low-level host lifetime, dynamic lane, reload, or library resolution details |
-| [Platform status](platforms.md) | You need backend capability and compositor caveats |
-| [Architecture](architecture.md) | You need compiler, wire, VM, worker, and renderer boundaries |
-| [Native C ABI](native-abi.md) | You are embedding Spellwire outside Bun |
+| [Automation semantics](automation.md) | Suppression rules, state gates, output helpers, timing, and the AutoHotkey migration matrix |
+| [Realtime TypeScript](typescript-runtime.md) | Compiler syntax, loops, helpers, diagnostics, and resource budgets |
+| [Overlay design](overlay.md) | State binding, layout, styling, window policy, reconciliation, and renderer isolation |
+| [Live native host](live-host.md) | Host lifecycle, dynamic input lane, reload, shutdown, and library resolution |
+| [Platform status](platforms.md) | Backend capabilities, permissions, verification status, and compositor notes |
+| [Architecture](architecture.md) | Compiler, wire format, VM, worker, native host, and renderer boundaries |
+| [Native C ABI](native-abi.md) | Stable ABI for embedding Spellwire outside Bun |
 
 ## Maintainer and release material
 

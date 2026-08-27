@@ -2,7 +2,7 @@
 
 [한국어](status.ko.md)
 
-Spellwire is an early alpha with the README implementation plan represented in source. Platform validation remains deliberately separated from implementation.
+Spellwire is an early alpha. This page tracks implemented surfaces separately from platform acceptance results.
 
 ## Implemented
 
@@ -26,14 +26,14 @@ Spellwire is an early alpha with the README implementation plan represented in s
 
 | Surface | macOS arm64 | Windows x64 | Linux x64 |
 | --- | --- | --- | --- |
-| Rust/TypeScript unit tests | Passed locally | CI source coverage | CI source coverage |
-| Target compile + Clippy | Passed | Cross-target passed | Cross-target passed |
-| Global observe → VM → inject → observe loopback | Passed | Target-machine run pending | Target-machine run pending |
-| Original input suppression + state-gated pass-through | Passed with CoreGraphics head/tail probe | Target-machine run pending | Not implemented |
-| Bun shared dynamic lane | Passed | Target-machine run pending | Target-machine run pending |
-| Native overlay + configurable window-policy smoke | Passed | Target-machine run pending | Display/compositor run pending |
+| Rust/TypeScript unit tests | Passed locally | Passed on target | CI source coverage |
+| Target compile + Clippy | Passed | Passed on target | Cross-target passed |
+| Global observe → VM → inject → observe loopback | Passed | Passed in interactive session | Target-machine run pending |
+| Original input suppression + state-gated pass-through | Passed with CoreGraphics head/tail probe | Physical-input smoke pending | Not implemented |
+| Bun shared dynamic lane | Passed | Passed in interactive session | Target-machine run pending |
+| Native overlay + configurable window-policy smoke | Passed | Window policy/live update passed; visual transparency pending | Display/compositor run pending |
 
-The macOS loopback uses a physical-source F19 dispatch, native F20 injection, tagged synthetic re-observation, and a second VM handler/state update. This is an OS loopback test, not a physical keyboard switch-to-application latency claim.
+The macOS and Windows loopbacks use a physical-source F19 test dispatch, native F20 injection, tagged synthetic re-observation, and a second VM handler/state update. They test the OS backend without measuring a physical keyboard switch or target-application receipt. Windows checks run in an interactive desktop session because Session 0 blocks `SendInput`.
 
 ## Capability bits
 
@@ -54,12 +54,13 @@ These need credentials, hardware, or target machines and cannot be completed by 
 
 - actual npm publication and registry propagation;
 - Authenticode/Developer ID signing and Apple notarization with repository secrets;
-- Windows and Linux permission/setup smoke runs;
 - Windows consuming hotkey/remap smoke run;
+- Windows per-pixel overlay transparency visual check;
+- Linux permission/device/display target run;
 - Linux exclusive evdev pass-through relay before suppression can be claimed;
 - physical switch → HID → OS → target-application latency measurements;
 - Linux overlay behavior on each intended X11/Wayland compositor.
 
 Run and report the target-machine gates with [Platform Verification Guide](platform-verification.md). Use [Live Native Host Guide](live-host.md) when integrating the implemented host APIs into an application.
 
-The broader AutoHotkey compatibility gaps are tracked without overclaiming in [Hotkeys and automation](automation.md#autohotkey-migration-status).
+The [Hotkeys and automation](automation.md#autohotkey-migration-status) matrix tracks remaining AutoHotkey compatibility gaps.

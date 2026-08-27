@@ -9,6 +9,18 @@ const root = resolve(import.meta.dir, "..");
 const ignoredDirectories = new Set([".git", "node_modules", "target", "dist"]);
 const markdownFiles: string[] = [];
 const failures: string[] = [];
+const forbiddenDocumentationPatterns = [
+  { pattern: /\bone[- ]page\b/iu, description: "forced one-page wording" },
+  { pattern: /한 페이지/u, description: "forced one-page wording" },
+  {
+    pattern: /packages\/spellwire\/src\/cli\.ts permissions/u,
+    description: "removed permissions CLI command",
+  },
+  {
+    pattern: /\b(?:observe|inject): (?:granted|missing)\b/u,
+    description: "obsolete permission output format",
+  },
+] as const;
 
 async function collect(directory: string): Promise<void> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -30,6 +42,10 @@ for (const file of markdownFiles) {
   }
 
   const text = await Bun.file(file).text();
+  for (const { pattern, description } of forbiddenDocumentationPatterns) {
+    if (pattern.test(text)) failures.push(`${file}: contains ${description}`);
+  }
+
   const fenceCount = text.match(/^```/gm)?.length ?? 0;
   if (fenceCount % 2 !== 0) failures.push(`${file}: unbalanced fenced code blocks`);
 
@@ -48,7 +64,8 @@ const requiredApiSurface = new Map<string, readonly string[]>([
   [
     "docs/api.md",
     [
-      "## Find an API without leaving this page",
+      "## Quick lookup",
+      "## Public export index",
       "## Persistent realtime state",
       "## Unified application lifecycle",
       "### UI constructors",
@@ -59,7 +76,8 @@ const requiredApiSurface = new Map<string, readonly string[]>([
   [
     "docs/api.ko.md",
     [
-      "## 이 페이지에서 바로 찾기",
+      "## 빠른 찾기",
+      "## 공개 export 목록",
       "## 영속 realtime 상태",
       "## 통합 application lifecycle",
       "### UI 생성 함수",
@@ -67,8 +85,8 @@ const requiredApiSurface = new Map<string, readonly string[]>([
       "### Window 동작",
     ],
   ],
-  ["README.md", ["## API at a glance", "[one-page API reference](docs/api.md)"]],
-  ["README.ko.md", ["## API 한눈에 보기", "[한 페이지 API 레퍼런스](docs/api.ko.md)"]],
+  ["README.md", ["## API at a glance", "[API reference](docs/api.md)"]],
+  ["README.ko.md", ["## API 한눈에 보기", "[API 레퍼런스](docs/api.ko.md)"]],
 ]);
 
 for (const [relativePath, requiredFragments] of requiredApiSurface) {
@@ -76,7 +94,7 @@ for (const [relativePath, requiredFragments] of requiredApiSurface) {
   const text = await Bun.file(file).text();
   for (const fragment of requiredFragments) {
     if (!text.includes(fragment)) {
-      failures.push(`${file}: missing one-page API navigation contract ${JSON.stringify(fragment)}`);
+      failures.push(`${file}: missing required API documentation ${JSON.stringify(fragment)}`);
     }
   }
 
@@ -100,6 +118,67 @@ for (const [relativePath, requiredFragments] of requiredApiSurface) {
           )}`,
         );
       }
+    }
+  }
+}
+
+function collectPublicExports(source: string, fileName: string): Set<string> {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const names = new Set<string>();
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      if (statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+        for (const element of statement.exportClause.elements) names.add(element.name.text);
+      }
+      continue;
+    }
+
+    if (!ts.canHaveModifiers(statement)) continue;
+    const isExported = ts
+      .getModifiers(statement)
+      ?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+    if (!isExported) continue;
+
+    if (
+      (ts.isFunctionDeclaration(statement) ||
+        ts.isClassDeclaration(statement) ||
+        ts.isInterfaceDeclaration(statement) ||
+        ts.isTypeAliasDeclaration(statement) ||
+        ts.isEnumDeclaration(statement)) &&
+      statement.name
+    ) {
+      names.add(statement.name.text);
+      continue;
+    }
+
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) names.add(declaration.name.text);
+      }
+    }
+  }
+
+  return names;
+}
+
+const publicExportFiles = [
+  "packages/spellwire/src/index.ts",
+  "packages/spellwire/src/compiler/index.ts",
+] as const;
+const publicExports = new Set<string>();
+for (const relativePath of publicExportFiles) {
+  const file = resolve(root, relativePath);
+  const source = await Bun.file(file).text();
+  for (const name of collectPublicExports(source, relativePath)) publicExports.add(name);
+}
+
+for (const relativePath of ["docs/api.md", "docs/api.ko.md"] as const) {
+  const file = resolve(root, relativePath);
+  const text = await Bun.file(file).text();
+  for (const name of publicExports) {
+    if (!new RegExp(`\\b${name}\\b`, "u").test(text)) {
+      failures.push(`${file}: missing public export ${name}`);
     }
   }
 }

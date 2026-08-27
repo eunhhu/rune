@@ -94,7 +94,7 @@ The root `overlay(state)` callback is React-like render/reconcile: one bulk name
 
 For callback-level fine granularity, use `ui.bind(host.states.enabled, render)` or another narrow readable source. Only the changed binding callback reruns. This explicit split avoids proxies, dependency tracking, allocations, and JavaScript work in the realtime input path.
 
-## UI API pool
+## UI constructors
 
 | API | Purpose |
 |---|---|
@@ -113,7 +113,7 @@ Children may be nested arrays, `false`, `null`, or `undefined`, so normal TypeSc
 
 ## Layout properties
 
-Frames support the minimum modern layout vocabulary used by Figma auto layout:
+Frames support horizontal, vertical, and stacked auto layout:
 
 ```ts
 ui.row({
@@ -189,7 +189,7 @@ overlayOptions: {
 
 These values are the defaults except for the title. `clickThrough` controls pointer hit testing; `focusable` separately controls activation/focus. `visible: false` creates the renderer hidden until `show()`. The validated values are available at `app.overlay?.renderer.ready.window`.
 
-This is a native winit/wgpu window and surface, not a DOM, WebView, or compatibility UI. macOS uses the prohibited activation policy when non-focusable and the accessory policy when focusable; Windows disables a non-focusable window; Linux applies the hints exposed by winit. X11/Wayland compositor rules can differ, so Linux needs target-desktop verification. Primary-monitor full bounds remain fixed startup geometry; public multi-monitor routing is still pending.
+The renderer uses a native winit/wgpu window and surface with no DOM or WebView layer. macOS uses the prohibited activation policy when non-focusable and the accessory policy when focusable; Windows disables a non-focusable window; Linux applies the hints exposed by winit. `app.overlay?.renderer.ready.alphaMode` reports the selected surface mode. Windows policy/live-update smoke tests pass, but `alphaMode: "Opaque"` requires a separate visual transparency check. X11/Wayland compositor rules can differ, so Linux needs target-desktop verification. Primary-monitor full bounds remain fixed startup geometry; public multi-monitor routing is still pending.
 
 ## Direct binding without `Spellwire.start()`
 
@@ -240,6 +240,7 @@ On the development macOS arm64 machine, three isolated runs of a 26-primitive st
 ## Current boundaries
 
 - Overlay-safe defaults are non-focusable and click-through; both policies are configurable. Interactive controls/widgets are not yet included.
+- Windows per-pixel transparency requires visual verification when wgpu selects `alphaMode: "Opaque"`.
 - System and monospace font families are supported; arbitrary font-file loading is not yet public.
 - The primary monitor is used; multi-monitor routing is not yet public.
 - Images, arbitrary vector paths, clipping, and animation are not yet public APIs.

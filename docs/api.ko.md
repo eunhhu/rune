@@ -1,12 +1,10 @@
-# Spellwire API — 한 페이지 레퍼런스
+# Spellwire API 레퍼런스
 
 [English](api.md)
 
-일반 Spellwire 앱에 필요한 명령, 실시간 자동화, 영속 상태, 앱 수명 주기, overlay UI를 이 페이지 하나에서 찾을 수 있습니다. 다른 문서는 내부 구조, 플랫폼 검증, 설계 이유를 설명하는 선택 자료입니다. 일상 API를 찾기 위해 페이지를 오갈 필요가 없습니다.
+프로젝트 명령, 실시간 자동화, 영속 상태, application lifecycle, overlay UI를 설명합니다. 관련 guide에서는 플랫폼 검증, 구현 상세, 설계 결정을 다룹니다.
 
-현재 source tree에 실제로 존재하는 API만 적습니다. 예전 설계 초안의 `macro(...)`, `spellwire.start()`, `rt.load(...)`, `on.keyDown(...)`, `key.tap(...)`은 export하지 않습니다.
-
-## 이 페이지에서 바로 찾기
+## 빠른 찾기
 
 | 하고 싶은 일 | 사용할 API | 위치 |
 | --- | --- | --- |
@@ -25,7 +23,7 @@
 | topmost/transparency/focus 설정 | `overlayOptions.window` | [Window 동작](#window-동작) |
 | native host 직접 제어 | `NativeHost` | [Native host와 권한](#native-host와-권한) |
 
-## 바로 실행 가능한 전체 앱
+## 예제: 상태 기반 입력과 overlay
 
 생성 프로젝트는 `src/main.ts` 하나를 제공합니다. compiler는 realtime handler만 native bytecode로 추출하고 같은 파일의 제한 없는 application/overlay 코드는 Bun에 둡니다. authoring은 하나로 합치면서 input event path에는 JavaScript를 넣지 않습니다.
 
@@ -156,6 +154,27 @@ compiler API:
 ```ts
 import { compileSource, encodeModule } from "spellwire/compiler";
 ```
+
+## 공개 export 목록
+
+package root가 export하는 public 이름입니다. 아래 상세 절에서는 일반 application API를 설명하고, low-level type은 editor 검색과 library 연동을 위해 이 표에 함께 정리합니다.
+
+| 영역 | Export |
+| --- | --- |
+| Key와 hotkey | `Key`, `Modifier`, `MouseButton`, `InputSource`, `parseHotkey`, `ParsedHotkey` |
+| Application | `Spellwire`, `SpellwireStartOptions` |
+| Realtime 등록 | `rt`, `HotkeyOptions`, `RemapOptions`, `RealtimeOptions`, `RealtimeRegistration` |
+| Realtime 출력 | `keyDown`, `keyUp`, `tapKey`, `keyHeld`, `mouseDown`, `mouseUp`, `clickMouse`, `mouseHeld`, `moveMouse`, `wheelMouse`, `sleep`, `sleepUs`, `sleepMs`, `sleepSeconds`, `sleepMinutes`, `sleepHours` |
+| Fallback test | `getFallbackRealtimeRegistrations`, `withRealtimeActionSink`, `RealtimeActionSink` |
+| Runtime과 dynamic lane | `DynamicInputLane`, `EventSource`, `InputDevice`, `InputEdge`, `InputEvent`, `InputHandler`, `NativeState`, `NativeStateBridge`, `SpscInt32Ring` |
+| Overlay runtime | `Overlay`, `OverlayView`, `OverlayScene`, `NativeOverlayRenderer`, `OverlayMountOptions`, `OverlayBindingOptions`, `OverlayReadable`, `OverlayStateSource` |
+| Overlay UI | `ui`, `OverlayChild`, `OverlayElement`, `OverlayLayoutProps`, `OverlayFrameProps`, `OverlayTextProps`, `OverlayEllipseProps`, `OverlayDotProps`, `OverlayDividerProps`, `OverlayBadgeProps`, `OverlayAlign`, `OverlayJustify`, `OverlayInsets`, `OverlayLength` |
+| Overlay primitive | `OverlayNode`, `OverlayNodeId`, `OverlayMutation`, `OverlayText`, `OverlayRect`, `OverlayEllipse`, `OverlayLine`, `OverlayFont`, `OverlayStroke`, `OverlayShadow` |
+| Overlay process와 window | `OverlayWindowOptions`, `ResolvedOverlayWindowOptions`, `NativeOverlayOptions`, `NativeOverlayReady`, `overlayExecutableFileName`, `resolveOverlayExecutable`, `resolveOverlayWindowOptions` |
+| Native host | `NativeHost`, `NativeHostOptions`, `NativeHostWatcher`, `NativeWatchOptions`, `NativeManifest`, `ProgramDescriptor`, `NativeRuntimeInfo`, `NativeStateManifestEntry`, `NativeStateSnapshot` |
+| Native capability | `NativeCapability`, `NativePermission`, `NATIVE_ABI_VERSION`, `inspectNativeRuntime`, `loadProgramDescriptor`, `nativeLibraryFileName`, `resolveNativeLibrary` |
+| Compiler | `compileSource`, `SpellwireCompileError`, `CompileDiagnostic`, `CompileOptions`, `CompileResult`, `encodeModule` |
+| Wire format과 IR | `Opcode`, `SourceFilter`, `TriggerFlag`, `WIRE_VERSION`, `WIRE_HEADER_SIZE`, `WIRE_HANDLER_SIZE`, `WIRE_INSTRUCTION_SIZE`, `CompiledModule`, `Handler`, `Instruction`, `StateSlot` |
 
 ## 영속 realtime 상태
 
@@ -389,6 +408,15 @@ host.close();
 
 ## Native host와 권한
 
+host를 시작하지 않고 현재 native library를 확인할 수 있습니다.
+
+```bash
+bun run inspect:runtime
+bun run inspect:runtime -- --request-permissions
+```
+
+두 번째 명령은 플랫폼 권한을 요청하거나 다시 확인합니다. 두 명령 모두 ABI version, native library 경로, 활성 capability 이름, observe/inject 권한을 출력합니다.
+
 ```ts
 const host = await NativeHost.load("macro.spellwire.ts", {
   nativeLibraryPath: "/optional/explicit/library",
@@ -607,7 +635,7 @@ await overlay.close();
 | `OverlayWindowOptions` | 기본값 | Native 요청 |
 | --- | --- | --- |
 | `title` | `"Spellwire Overlay"` | 1–256자 window title |
-| `transparent` | `true` | alpha surface와 transparent window |
+| `transparent` | `true` | backend가 지원하면 native transparent window와 alpha-capable surface 요청 |
 | `alwaysOnTop` | `true` | always-on-top window level |
 | `focusable` | `false` | overlay activation/focus 허용 여부 |
 | `clickThrough` | `true` | true이면 pointer hit testing 비활성 |
@@ -634,7 +662,9 @@ const app = await Spellwire.start({
 });
 ```
 
-ready message의 `overlay.renderer.ready.window`에서 validate 및 default resolve가 끝난 요청 정책을 확인할 수 있습니다. renderer는 native winit/wgpu process이며 WebView compatibility layer가 없습니다. `focusable`과 `clickThrough`는 별도입니다. focusable window도 pointer hit을 무시할 수 있고 non-focusable window도 pointer hit을 받을 수 있습니다. macOS는 non-focusable일 때 prohibited activation policy, focusable일 때 accessory policy를 사용하고 Windows는 non-focusable일 때 native window를 disable하며 Linux는 가능한 winit/compositor hint를 사용합니다. 모든 X11/Wayland compositor에서 focus/topmost가 완전히 같다고 보장할 수 없으므로 대상 Linux desktop에서 검증해야 합니다.
+ready message의 `overlay.renderer.ready.window`에서 validate 및 default resolve가 끝난 요청 정책을 확인할 수 있고, `overlay.renderer.ready.alphaMode`에서 wgpu가 선택한 surface mode를 확인할 수 있습니다. renderer는 WebView layer가 없는 native winit/wgpu process입니다. `focusable`과 `clickThrough`는 별도입니다. focusable window도 pointer hit을 무시할 수 있고 non-focusable window도 pointer hit을 받을 수 있습니다. macOS는 non-focusable일 때 prohibited activation policy, focusable일 때 accessory policy를 사용하고 Windows는 non-focusable일 때 native window를 disable하며 Linux는 가능한 winit/compositor hint를 사용합니다.
+
+Windows lifecycle과 window-policy smoke test는 통과했지만 현재 wgpu backend가 `alphaMode: "Opaque"`를 보고할 수 있습니다. 정책 적용 결과만으로 per-pixel 시각 투명성을 확인할 수 없으므로 대상 Windows desktop에서 직접 확인해야 합니다. focus, topmost, click-through, 투명도는 X11/Wayland compositor에 따라서도 달라질 수 있어 Linux도 대상 desktop 검증이 필요합니다.
 
 초기 monitor와 size는 아직 primary monitor 전체 영역입니다. monitor routing과 명시적 window geometry는 public API가 아닙니다. Windows에서는 `focusable: false`이면 window도 non-interactive입니다. interactive decorated tool window에는 `focusable: true`를 사용하십시오.
 

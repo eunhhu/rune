@@ -2,7 +2,7 @@
 
 [English](status.md)
 
-Spellwire는 README 구현 계획이 source에 반영된 초기 alpha입니다. source 구현과 대상 플랫폼 검증을 의도적으로 구분합니다.
+Spellwire는 초기 alpha입니다. 이 문서는 구현된 영역과 플랫폼 acceptance 결과를 구분해 기록합니다.
 
 ## 구현 완료
 
@@ -26,14 +26,14 @@ Spellwire는 README 구현 계획이 source에 반영된 초기 alpha입니다. 
 
 | 영역 | macOS arm64 | Windows x64 | Linux x64 |
 | --- | --- | --- | --- |
-| Rust/TypeScript unit test | local 통과 | CI source coverage | CI source coverage |
-| target compile + Clippy | 통과 | cross-target 통과 | cross-target 통과 |
-| observe → VM → inject → observe loopback | 통과 | 실제 장비 대기 | 실제 장비 대기 |
-| 원본 입력 차단 + 상태 gate pass-through | CoreGraphics head/tail probe 통과 | 실제 장비 대기 | 미구현 |
-| Bun shared dynamic lane | 통과 | 실제 장비 대기 | 실제 장비 대기 |
-| native overlay + configurable window-policy smoke | 통과 | 실제 장비 대기 | display/compositor 대기 |
+| Rust/TypeScript unit test | local 통과 | 대상 장비 통과 | CI source coverage |
+| target compile + Clippy | 통과 | 대상 장비 통과 | cross-target 통과 |
+| observe → VM → inject → observe loopback | 통과 | 대화형 session 통과 | 실제 장비 대기 |
+| 원본 입력 차단 + 상태 gate pass-through | CoreGraphics head/tail probe 통과 | 물리 입력 smoke 대기 | 미구현 |
+| Bun shared dynamic lane | 통과 | 대화형 session 통과 | 실제 장비 대기 |
+| native overlay + configurable window-policy smoke | 통과 | window policy/live update 통과, 시각적 투명도 대기 | display/compositor 대기 |
 
-macOS loopback은 physical-source F19 명시 dispatch, native F20 injection, tagged synthetic re-observation, 두 번째 VM handler/state update를 사용합니다. OS loopback이며 물리 keyboard의 switch-to-application latency가 아닙니다.
+macOS와 Windows loopback은 physical-source F19 test dispatch, native F20 injection, tagged synthetic re-observation, 두 번째 VM handler/state update를 사용합니다. OS backend를 검증하지만 물리 keyboard switch나 target application 수신은 측정하지 않습니다. Windows 검증은 Session 0에서 `SendInput`이 차단되므로 대화형 desktop session에서 실행합니다.
 
 ## Capability bit
 
@@ -54,12 +54,13 @@ source 변경만으로 완료할 수 없는 항목:
 
 - 실제 npm publish와 registry propagation
 - repository secret을 사용한 Authenticode/Developer ID signing과 Apple notarization
-- Windows/Linux permission/setup smoke
 - Windows consuming hotkey/remap 실제 장비 smoke
+- Windows overlay per-pixel transparency 시각 검증
+- Linux permission/device/display 대상 실행
 - suppression을 주장하기 전 Linux exclusive evdev pass-through relay 구현
 - physical switch → HID → OS → target application latency
 - 지원하려는 X11/Wayland compositor별 Linux overlay 동작
 
 [플랫폼 검증](platform-verification.ko.md)으로 대상 결과를 기록하고 [라이브 네이티브 호스트](live-host.ko.md)로 애플리케이션 통합을 진행하십시오.
 
-더 넓은 AutoHotkey compatibility gap은 과장 없이 [Hotkey와 자동화](automation.ko.md#autohotkey-마이그레이션-상태)에 기록합니다.
+[Hotkey와 자동화](automation.ko.md#autohotkey-마이그레이션-상태)의 matrix에서 남은 AutoHotkey compatibility gap을 확인할 수 있습니다.

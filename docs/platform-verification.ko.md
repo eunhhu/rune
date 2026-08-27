@@ -4,14 +4,14 @@
 
 모든 release 대상 OS에서 이 절차를 사용하십시오. source check, native OS loopback, submission timing, overlay startup, 물리 end-to-end latency는 서로 다른 검증입니다. 한 단계의 성공이 다음 단계를 증명하지 않습니다.
 
-생성 프로젝트의 일반 사용자는 별도 권한 workflow가 필요하지 않습니다. `bun run start`와 `bun run watch`가 권한을 자동 준비합니다. 이 release checklist는 raw ABI/capability/permission 값을 기록해야 하므로 호환용 고급 `permissions` 진단 명령을 사용합니다.
+생성 프로젝트의 일반 사용자는 별도 권한 workflow가 필요하지 않습니다. `bun run start`와 `bun run watch`가 권한을 자동 준비합니다. 저장소 검증에서는 `bun run inspect:runtime`으로 ABI, capability, native library 경로, 현재 permission flag를 출력합니다.
 
 ## 각 검증이 증명하는 범위
 
 | 검증 | 증명하는 내용 | 증명하지 않는 내용 |
 | --- | --- | --- |
 | `bun run check` | TypeScript/Rust compile, test, format, Clippy | device permission, 실제 OS 동작 |
-| `permissions` | native library load와 현재 process의 resource 접근 상태 | Windows의 모든 integrity level 대상 injection |
+| `inspect:runtime` | native library load와 현재 process의 resource 접근 상태 | Windows의 모든 integrity level 대상 injection |
 | `test:platform-loopback` | VM 출력 → OS injection → global observation → synthetic 분류 → VM 상태 갱신 | 물리 keyboard latency, target application 수신 |
 | `bench:platform` | native OS submission call 반환 시간 | device delivery, compositor, application polling |
 | overlay `--smoke` | window, GPU surface, transparency mode, event loop 초기화 | 모든 compositor와 multi-monitor 표시 품질 |
@@ -44,7 +44,7 @@ bun run build:native
 ### 1. 두 privacy permission 허용
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions --request
+bun run inspect:runtime -- --request-permissions
 ```
 
 macOS에서 필요한 항목:
@@ -55,17 +55,18 @@ macOS에서 필요한 항목:
 Bun을 실제로 시작하는 애플리케이션에 권한을 주어야 합니다. Terminal, iTerm, IDE, Codex 중 실제 launcher를 확인하십시오. 상태가 바뀌지 않으면 해당 애플리케이션을 완전히 종료하고 다시 여십시오. 명령만 재실행하면 기존 process의 privacy 상태가 갱신되지 않을 수 있습니다.
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
 정상 형태:
 
-```text
-library: /.../target/release/libspellwire_native.dylib
-ABI: 4
-capabilities: 0x77
-observe: granted
-inject: granted
+```json
+{
+  "abiVersion": 4,
+  "nativeLibraryPath": "/.../target/release/libspellwire_native.dylib",
+  "capabilities": { "mask": "0x77", "enabled": ["..."] },
+  "permissions": { "mask": "0x3", "observe": true, "inject": true }
+}
 ```
 
 ### 2. 네이티브 loopback
@@ -104,7 +105,7 @@ bun run test:consume-macos
 bun run bench:platform -- 10000
 ```
 
-p50, p95, p99, p999, max nanosecond를 출력합니다. macOS에서는 `CGEventPost` 제출 작업이 반환될 때까지의 시간입니다. 물리 switch-to-application latency로 발표하면 안 됩니다.
+p50, p95, p99, p999, max nanosecond를 출력합니다. macOS에서는 `CGEventPost` 제출 작업이 반환될 때까지의 시간이며 물리 switch-to-application latency는 포함하지 않습니다.
 
 ### 5. Overlay smoke
 
@@ -130,7 +131,7 @@ bun run test:overlay-live
 bun install --frozen-lockfile
 bun run check
 bun run build:native
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
 library는 `target\release\spellwire_native.dll`, ABI는 `4`, capabilities는 `0x77`이어야 합니다. Windows는 low-level hook과 `SendInput`에 사전 permission prompt가 없으므로 현재 두 permission bit를 granted로 보고합니다.
@@ -152,6 +153,8 @@ bun run test:overlay-live
 
 Windows arm64에서는 `arch`가 `arm64`여야 합니다. 일반 앱에서는 성공하고 elevated 앱에서만 실패한다면 mapping failure보다 UIPI 동작일 가능성이 높습니다.
 
+이 검증은 대화형 desktop session에서 실행해야 합니다. SSH service는 보통 Session 0에서 실행되어 `SendInput`이 `ACCESS_DENIED`로 실패할 수 있으며, 이는 로그인된 desktop session 결과가 아닙니다. 현재 x64 Windows 기록에서는 대화형 세션에서 전체 source check, release build, loopback/reload, 기본·custom window-policy smoke, live overlay update, package dry-run, submission benchmark가 통과했습니다. 물리 consuming hotkey suppression과 시각적 per-pixel transparency는 수동 검증이 남아 있습니다.
+
 ## Linux 검증
 
 Linux backend는 evdev를 읽고 uinput device 하나를 만듭니다. 전역 입력을 노출하는 interface이므로 device 접근을 명시적으로 허용해야 합니다.
@@ -160,10 +163,10 @@ Linux backend는 evdev를 읽고 uinput device 하나를 만듭니다. 전역 �
 
 ```bash
 ls -l /dev/input/event* /dev/uinput
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
-`observe: granted`는 읽을 수 있는 evdev device를 하나 이상 발견했다는 뜻입니다. `inject: granted`는 `/dev/uinput`을 열었다는 뜻입니다. Linux의 `permissions --request`는 rule을 설치하거나 prompt를 표시하지 않고 같은 resource를 다시 조회합니다.
+`observe: true`는 읽을 수 있는 evdev device를 하나 이상 발견했다는 뜻입니다. `inject: true`는 `/dev/uinput`을 열었다는 뜻입니다. Linux의 `inspect:runtime -- --request-permissions`는 rule을 설치하거나 prompt를 표시하지 않고 같은 resource를 다시 조회합니다.
 
 ABI는 `4`, capabilities는 `0x37`이어야 합니다. Linux 원본 입력 차단은 아직 구현되지 않았으므로 이 대상 장비 검증에서 `consume`이 source event를 숨길 것으로 기대하면 안 됩니다.
 
@@ -186,7 +189,7 @@ sudo udevadm trigger --subsystem-match=input
 접근 권한이 즉시 갱신되지 않으면 logout/login 또는 device 재연결이 필요할 수 있습니다. systemd-logind `uaccess`가 없는 headless session/distribution은 배포판에 맞는 group/service rule이 필요합니다. 영구 해결책으로 `chmod 666`을 사용하지 마십시오.
 
 ```bash
-bun packages/spellwire/src/cli.ts permissions
+bun run inspect:runtime
 ```
 
 ### 3. Loopback과 benchmark
@@ -254,12 +257,12 @@ Scope: native OS submission call return; device delivery and application polling
 | 실패 | 가능성 높은 원인 | 다음 확인 |
 | --- | --- | --- |
 | native library not found | build 누락 또는 architecture 불일치 | `target/release` 파일명, stale override 확인 |
-| ABI mismatch | JS와 native artifact가 다른 commit | 같은 checkout에서 재빌드 |
-| macOS observation missing | launcher에 Input Monitoring 없음 | 정확한 앱 entry 확인 후 앱 완전 재시작 |
-| macOS injection missing | launcher에 Accessibility 없음 | 권한 허용 후 launcher 재시작 |
+| ABI mismatch | JS와 native artifact가 다른 commit | 같은 checkout에서 재빌드 후 `bun run inspect:runtime` 재실행 |
+| macOS `permissions.observe: false` | launcher에 Input Monitoring 없음 | 정확한 앱 entry 확인 후 앱 완전 재시작 |
+| macOS `permissions.inject: false` | launcher에 Accessibility 없음 | 권한 허용 후 launcher 재시작 |
 | Windows loopback timeout | hook/session/integrity mismatch | 일반 local desktop과 같은 integrity에서 재검증 |
-| Linux observation missing | 읽을 수 있는 event device 없음 | owner/ACL과 active-seat udev 확인 |
-| Linux injection missing | `/dev/uinput` 없음 또는 write 불가 | 배포판 방식으로 uinput enable, ACL 확인 |
+| Linux `permissions.observe: false` | 읽을 수 있는 event device 없음 | owner/ACL과 active-seat udev 확인 |
+| Linux `permissions.inject: false` | `/dev/uinput` 없음 또는 write 불가 | 배포판 방식으로 uinput enable, ACL 확인 |
 | Linux injection 후 timeout | virtual device registration/ACL 지연 | `/sys/class/input/*/device/name`, udev event 확인 |
 | overlay ready 전 종료 | GPU surface/adapter 또는 graphical session 없음 | stderr, session env, driver, headless/remote 여부 확인 |
 | Wayland에서 topmost 아님 | compositor policy 차이 | compositor 기록 후 전용 layer-shell 통합 검토 |
@@ -275,12 +278,7 @@ Physical or virtual machine:
 Bun version:
 Rust version:
 
-Permission output:
-  library:
-  ABI:
-  capabilities:
-  observe:
-  inject:
+Runtime info JSON:
 
 Loopback JSON:
 

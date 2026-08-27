@@ -4,7 +4,7 @@
 
 Spellwire can be installed into an existing Bun project or tested from a source checkout. The alpha supports deterministic simulation and a live native global-input host.
 
-This page is the shortest safe path through the project. Complete the compiler and simulator steps before enabling global input. When you reach the live host, [Live Native Host Guide](live-host.md) explains every lifecycle option; [Platform Verification Guide](platform-verification.md) provides OS-specific permission and test commands.
+Compile and simulate the example before enabling global input. [Live Native Host Guide](live-host.md) explains lifecycle options, and [Platform Verification Guide](platform-verification.md) provides OS-specific permission and test commands.
 
 ## Install from npm
 
@@ -24,7 +24,7 @@ bun run start
 
 Release packages are assembled with a native library and overlay executable for each supported platform.
 
-The generated project intentionally exposes only three workflows:
+The generated project uses three commands:
 
 ```bash
 bun run start  # compile in memory and run once
@@ -207,9 +207,10 @@ Verify injection → observation → VM state on the current machine:
 bun run test:platform-loopback
 bun run bench:platform -- 10000
 target/release/spellwire-overlay --smoke
+bun run test:overlay-live
 ```
 
-On Windows, the overlay executable is `target/release/spellwire-overlay.exe`. On Linux, the overlay command needs an active graphical session. Do not interpret `bench:platform` as physical key-to-application latency; it measures only native OS submission-call return time.
+On Windows, the overlay executable is `target/release/spellwire-overlay.exe`. On Linux, the overlay command needs an active graphical session. `bench:platform` measures native OS submission-call return time, not physical key-to-application latency.
 
 The loopback command should print JSON with all of these success fields:
 
@@ -230,7 +231,7 @@ The permanent GitHub workflow additionally runs Rust tests/builds on Linux, macO
 
 ## Platform validation status
 
-macOS arm64 has local permission, loopback, dynamic-lane, overlay, and submission-benchmark verification. Windows/Linux backends have target compilation and translation tests but still need the commands above on real target machines. See [Platform Status](platforms.md) for setup and exact limitations.
+macOS arm64 has local permission, loopback, suppression, dynamic-lane, overlay, and submission-benchmark verification. Windows x64 has interactive-session source, build, loopback/reload, dynamic-lane, overlay lifecycle/window-policy, package, and benchmark verification; physical suppression and visual transparency remain manual checks. Linux has source coverage but still needs device and graphical-session verification. See [Platform Status](platforms.md) for setup and exact limitations.
 
 ## Where to continue
 

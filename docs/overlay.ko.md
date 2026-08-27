@@ -94,7 +94,7 @@ root `overlay(state)` callback은 React식 render/reconcile입니다. named stat
 
 callback 단위 fine granularity가 필요하면 `ui.bind(host.states.enabled, render)`처럼 좁은 readable source를 사용하십시오. 바뀐 binding callback만 다시 실행합니다. 이 명시적 분리는 realtime input path에서 proxy, dependency tracking, allocation, JavaScript 작업을 없앱니다.
 
-## UI API 목록
+## UI 생성 함수
 
 | API | 용도 |
 |---|---|
@@ -113,7 +113,7 @@ child에는 중첩 배열, `false`, `null`, `undefined`를 넣을 수 있어 일
 
 ## Layout 속성
 
-frame은 Figma auto layout에 필요한 최소 modern layout vocabulary를 지원합니다.
+frame은 horizontal, vertical, stack auto layout을 지원합니다.
 
 ```ts
 ui.row({
@@ -189,7 +189,7 @@ overlayOptions: {
 
 title을 제외하면 위 값이 기본값입니다. `clickThrough`는 pointer hit test, `focusable`은 activation/focus를 별도로 제어합니다. `visible: false`이면 `show()` 전까지 hidden으로 생성합니다. validate된 값은 `app.overlay?.renderer.ready.window`에서 확인할 수 있습니다.
 
-DOM, WebView, compatibility UI가 아니라 native winit/wgpu window와 surface입니다. macOS는 non-focusable일 때 prohibited activation policy, focusable일 때 accessory policy를 사용하고 Windows는 non-focusable window disable을 사용하며 Linux는 winit이 제공하는 hint를 적용합니다. X11/Wayland compositor 규칙이 다를 수 있어 Linux는 대상 desktop 검증이 필요합니다. 시작 geometry는 아직 primary monitor 전체 영역이고 public multi-monitor routing은 미구현입니다.
+renderer는 DOM이나 WebView layer 없이 native winit/wgpu window와 surface를 사용합니다. macOS는 non-focusable일 때 prohibited activation policy, focusable일 때 accessory policy를 사용하고 Windows는 non-focusable window disable을 사용하며 Linux는 winit이 제공하는 hint를 적용합니다. `app.overlay?.renderer.ready.alphaMode`에서 선택된 surface mode를 확인할 수 있습니다. Windows policy/live-update smoke test는 통과했지만 `alphaMode: "Opaque"`이면 시각적 transparency 검증이 별도로 필요합니다. X11/Wayland compositor 규칙이 다를 수 있어 Linux는 대상 desktop 검증이 필요합니다. 시작 geometry는 아직 primary monitor 전체 영역이고 public multi-monitor routing은 미구현입니다.
 
 ## `Spellwire.start()` 없이 직접 binding
 
@@ -240,6 +240,7 @@ bun run bench:overlay
 ## 현재 경계
 
 - overlay용 안전 기본값은 non-focusable + click-through이며 둘 다 설정할 수 있습니다. interactive control/widget은 아직 제공하지 않습니다.
+- wgpu가 `alphaMode: "Opaque"`를 선택한 Windows 환경에서는 per-pixel transparency를 직접 확인해야 합니다.
 - system/monospace font family를 지원합니다. 임의 font file loading은 아직 public API가 아닙니다.
 - primary monitor를 사용합니다. multi-monitor routing은 아직 public API가 아닙니다.
 - image, arbitrary vector path, clipping, animation은 아직 public API가 아닙니다.
