@@ -69,7 +69,7 @@ Normal `run`/`watch` commands prepare permissions automatically. From a source c
 bun run inspect:runtime
 ```
 
-A ready host reports `permissions.observe: true` and `permissions.inject: true`. ABI `4` is expected. Windows/macOS report capability mask `0x77`; Linux reports `0x37` because original-input suppression is pending there. Windows UIPI is target-specific, macOS has two privacy grants, and Linux requires device-file access.
+A ready host reports `permissions.observe: true` and `permissions.inject: true`. ABI `5` is expected. Windows/macOS report capability mask `0xf7`; Linux reports `0xb7` because original-input suppression is pending there. Windows UIPI is target-specific, macOS has two privacy grants, and Linux requires device-file access.
 
 ## CLI commands
 
@@ -309,6 +309,14 @@ Capacity must be a power of two between 2 and 2^31. A full ring increments `lane
 `drain()` returns the number of records consumed. It cannot be called reentrantly on the same lane. Adding or removing a handler during dispatch affects subsequent events, not the current snapshot.
 
 `host.dispatch(...)` is an explicit VM input used by tests and embedders. It does not replace the global observer and should not be confused with physical device input.
+
+## Receive state/effects and bridge another app
+
+`NativeHost` lazily attaches its 20-word `RuntimeEventLane` for the first consumer. Use `host.onStateChange`, `host.effects.on`, or allocation-free `host.effects.onRaw`; registered consumers start a drain pump (4 ms by default), and removing the last consumer stops it and detaches the lane. `eventCapacity` and `eventPollIntervalMs` tune the lane. `host.pollEvents()` attaches it without a timer when an existing event loop should own draining.
+
+The lane is native-to-Bun and separate from `DynamicInputLane`. It carries only actual state changes, fixed `i64` effects, and reload markers. State overflow recovers from a bulk snapshot; effects remain transient.
+
+To expose these values to Electron or a sidecar, use the authenticated local `SpellwireRpcServer` and the Node-compatible `SpellwireRpcClient`. Complete code and delivery rules are in [Effects and RPC](effects-rpc.md).
 
 ## Native library discovery
 

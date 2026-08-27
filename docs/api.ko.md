@@ -126,6 +126,7 @@ import {
   Modifier,
   MouseButton,
   clickMouse,
+  effect,
   keyDown,
   keyHeld,
   keyUp,
@@ -135,6 +136,7 @@ import {
   moveMouse,
   parseHotkey,
   rt,
+  readRuntimeEventI64,
   sleep,
   sleepHours,
   sleepMinutes,
@@ -144,6 +146,8 @@ import {
   tapKey,
   ui,
   wheelMouse,
+  SpellwireRpcClient,
+  SpellwireRpcServer,
 } from "spellwire";
 ```
 
@@ -164,17 +168,19 @@ package root가 export하는 public 이름입니다. 아래 상세 절에서는 
 | Key와 hotkey | `Key`, `Modifier`, `MouseButton`, `InputSource`, `parseHotkey`, `ParsedHotkey` |
 | Application | `Spellwire`, `SpellwireStartOptions` |
 | Realtime 등록 | `rt`, `HotkeyOptions`, `RemapOptions`, `RealtimeOptions`, `RealtimeRegistration` |
+| Realtime effect | `effect`, `RealtimeEffect`, `EffectSchema`, `EffectPayload`, `EffectValueKind` |
 | Realtime 출력 | `keyDown`, `keyUp`, `tapKey`, `keyHeld`, `mouseDown`, `mouseUp`, `clickMouse`, `mouseHeld`, `moveMouse`, `wheelMouse`, `sleep`, `sleepUs`, `sleepMs`, `sleepSeconds`, `sleepMinutes`, `sleepHours` |
 | Fallback test | `getFallbackRealtimeRegistrations`, `withRealtimeActionSink`, `RealtimeActionSink` |
-| Runtime과 dynamic lane | `DynamicInputLane`, `EventSource`, `InputDevice`, `InputEdge`, `InputEvent`, `InputHandler`, `NativeState`, `NativeStateBridge`, `SpscInt32Ring` |
+| Runtime lane | `DynamicInputLane`, `RuntimeEventLane`, `RuntimeEventKind`, `RUNTIME_EVENT_WORDS`, `readRuntimeEventI64`, `RawEffectHandler`, `StateChangeHandler`, `EventSource`, `InputDevice`, `InputEdge`, `InputEvent`, `InputHandler`, `NativeState`, `NativeStateBridge`, `SpscInt32Ring` |
 | Overlay runtime | `Overlay`, `OverlayView`, `OverlayScene`, `NativeOverlayRenderer`, `OverlayMountOptions`, `OverlayBindingOptions`, `OverlayReadable`, `OverlayStateSource` |
 | Overlay UI | `ui`, `OverlayChild`, `OverlayElement`, `OverlayLayoutProps`, `OverlayFrameProps`, `OverlayTextProps`, `OverlayEllipseProps`, `OverlayDotProps`, `OverlayDividerProps`, `OverlayBadgeProps`, `OverlayAlign`, `OverlayJustify`, `OverlayInsets`, `OverlayLength` |
 | Overlay primitive | `OverlayNode`, `OverlayNodeId`, `OverlayMutation`, `OverlayText`, `OverlayRect`, `OverlayEllipse`, `OverlayLine`, `OverlayFont`, `OverlayStroke`, `OverlayShadow` |
 | Overlay process와 window | `OverlayWindowOptions`, `ResolvedOverlayWindowOptions`, `NativeOverlayOptions`, `NativeOverlayReady`, `overlayExecutableFileName`, `resolveOverlayExecutable`, `resolveOverlayWindowOptions` |
 | Native host | `NativeHost`, `NativeHostOptions`, `NativeHostWatcher`, `NativeWatchOptions`, `NativeManifest`, `ProgramDescriptor`, `NativeRuntimeInfo`, `NativeStateManifestEntry`, `NativeStateSnapshot` |
 | Native capability | `NativeCapability`, `NativePermission`, `NATIVE_ABI_VERSION`, `inspectNativeRuntime`, `loadProgramDescriptor`, `nativeLibraryFileName`, `resolveNativeLibrary` |
+| Effect와 RPC | `NativeEffects`, `NativeEffectField`, `NativeEffectHandler`, `NativeEffectManifestEntry`, `NativeEffectPayload`, `NativeRawEffectHandler`, `SpellwireRpcServer`, `SpellwireRpcServerOptions`, `SpellwireRpcClient`, `SpellwireRpcClientOptions`, `RpcMethod`, `RpcEventHandler` |
 | Compiler | `compileSource`, `SpellwireCompileError`, `CompileDiagnostic`, `CompileOptions`, `CompileResult`, `encodeModule` |
-| Wire format과 IR | `Opcode`, `SourceFilter`, `TriggerFlag`, `WIRE_VERSION`, `WIRE_HEADER_SIZE`, `WIRE_HANDLER_SIZE`, `WIRE_INSTRUCTION_SIZE`, `CompiledModule`, `Handler`, `Instruction`, `StateSlot` |
+| Wire format과 IR | `Opcode`, `SourceFilter`, `TriggerFlag`, `WIRE_VERSION`, `WIRE_HEADER_SIZE`, `WIRE_HANDLER_SIZE`, `WIRE_INSTRUCTION_SIZE`, `CompiledModule`, `EffectSlot`, `EffectField`, `Handler`, `Instruction`, `StateSlot` |
 
 ## 영속 realtime 상태
 
@@ -194,7 +200,33 @@ rt.hotkey("F8", () => {
 
 상태는 dispatch 사이에 유지됩니다. source reload는 `preserveState: false`가 아니면 같은 이름과 kind의 값을 보존합니다. `when`은 native suppression table도 dispatch 전에 같은 gate를 평가해야 하므로 module-scope boolean 하나 또는 그 부정만 받습니다.
 
-realtime handler 밖에서는 `app.host.state("name")`, `app.host.states.name`, 또는 bulk `app.host.snapshotStates()`를 사용합니다. 이 경로는 control-plane FFI이며 realtime opcode가 아닙니다.
+realtime handler 밖에서는 `app.host.state("name")`, `app.host.states.name`, 또는 cached `app.host.snapshotStates()`를 사용합니다. scalar access는 control-plane FFI이고 snapshot은 event-maintained cache를 사용하며 초기화/복구 때만 bulk FFI를 호출합니다. 어느 쪽도 realtime opcode가 아닙니다.
+
+## Effect, state update, RPC
+
+현재 값에는 state를, 한 번 발생한 사건에는 effect를 사용합니다.
+
+```ts
+const completed = effect("completed", {
+  count: "number",
+  enabled: "boolean",
+});
+
+rt.hotkey("F6", () => {
+  count += 1;
+  completed.emit({ count, enabled });
+});
+
+const stop = app.host.effects.on("completed", (payload) => {
+  console.log(payload.count, payload.enabled);
+});
+```
+
+effect schema에는 `"number"`/`"boolean"` field를 최대 8개 둘 수 있습니다. compiler는 `emit`을 fixed-width `EmitEffect` opcode 하나로 lowering합니다. `app.host.effects.onRaw(name, handler)`는 재사용되는 20-word lane record를 직접 전달합니다. `readRuntimeEventI64(record, offset)`으로 `i64`를 읽고 record를 callback 밖에 보관하지 마십시오.
+
+`app.host.onStateChange(handler)`는 native state 값이 실제로 바뀐 뒤에만 실행됩니다. `app.host.pollEvents(maxEvents?)`로 직접 drain할 수도 있습니다. `snapshotStates()`는 보통 유지 중인 local cache를 읽고 overflow/reload 뒤에만 bulk FFI 한 번으로 복구합니다.
+
+Electron 또는 sidecar는 `spellwire/rpc/server`의 `SpellwireRpcServer`와 `spellwire/rpc`의 `SpellwireRpcClient`를 사용합니다. 인증 local socket/named pipe를 통해 state get/set/snapshot/subscription, effect subscription, custom method를 제공합니다. 실행 가능한 server/client 예제, 보안 규칙, overflow 동작, allocation-free raw 경로는 [Effect와 RPC](effects-rpc.ko.md)에 있습니다.
 
 ## 실시간 handler 등록
 
@@ -438,7 +470,10 @@ host.close();
 | `reload({ preserveState? })` | reload 직렬화, 기본적으로 compatible name/kind state 보존 |
 | `watch(options?)` | debounce와 callback을 지정해 file 감시 |
 | `state(name)` / `states[name]` | 현재 manifest의 `NativeState` 접근 |
-| `snapshotStates()` | native worker command 한 번으로 모든 named state 조회 |
+| `snapshotStates()` | 유지 중인 named-state cache 조회, attach/overflow/reload 뒤 bulk native 복구 |
+| `onStateChange(handler)` | 실제 changed-state record 구독, 유지 중일 때 event pump 시작 |
+| `effects.on(name, handler)` / `effects.onRaw(...)` | structured 또는 reused-record effect payload 구독 |
+| `pollEvents(maxEvents?)` | timer 없이 state/effect record 직접 drain |
 | `attachDynamicLane(lane)` | observed input을 shared record로 publish |
 | `dispatch(...)` | test/custom embedder용 명시 VM input |
 | `close()` | 필요 시 stop, native host free, library close |
@@ -473,9 +508,11 @@ await app.untilSignal();
 | `onReload` | — | watch reload 성공 후 호출 |
 | `onError` | console/기본 전파 | watch 또는 asynchronous overlay failure 수신 |
 | `overlay(state)` | — | shallow named-state snapshot으로 overlay 생성 |
-| `overlayOptions` | — | 아래 polling, renderer startup, native window option |
+| `overlayOptions` | — | 변경 기반 refresh 정책, renderer startup, native window option |
 | `nativeLibraryPath` | 자동 탐색 | native library 직접 지정 |
 | `manifestPath` | 인접 manifest | compiled binary의 manifest 직접 지정 |
+| `eventCapacity` | `1024` | native-to-Bun state/effect ring의 2의 거듭제곱 capacity |
+| `eventPollIntervalMs` | `4` | state/effect subscriber가 있을 때만 쓰는 drain 간격; 1–1000 ms |
 
 | App member | 계약 |
 | --- | --- |
@@ -619,7 +656,7 @@ await overlay.close();
 
 | `OverlayMountOptions` | 기본값 | 계약 |
 | --- | --- | --- |
-| `fps` | `30` | 초당 binding poll, `0`은 manual refresh; 0–240 |
+| `fps` | `Spellwire.start`는 event-driven, 직접 `Overlay.mount`는 `30` | 명시적 periodic binding rate, `0`은 manual refresh; 0–240 |
 | `executablePath` | 자동 탐색 | native renderer 직접 지정 |
 | `readyTimeoutMs` | `5_000` | renderer startup timeout |
 | `window` | overlay용 안전 기본값 | native window 정책; 아래 표 참고 |

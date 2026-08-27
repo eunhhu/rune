@@ -10,13 +10,15 @@ Spellwire separates unrestricted Bun control-plane work from bounded native even
 .spellwire.ts
     │ TypeScript AST compilation
     ▼
-SPWR bytecode + named-state manifest
+SPWR bytecode + state/effect manifest
     │ Bun FFI load/reload
     ▼
 platform observer → atomic consume policy → fixed SPSC queue → runtime worker → platform injector
                                                                │
                                                                ├─ fixed continuation deadlines
-                                                               └─ optional SharedArrayBuffer event ring → Bun
+                                                               └─ state/effect SharedArrayBuffer ring → Bun
+                                                                                                      │
+                                                                                                      └─ local RPC → Electron/sidecar
 
 Bun OverlayScene mutations → pipe → separate native retained renderer
 ```
@@ -32,7 +34,7 @@ The compiler parses source without executing it, finds top-level `rt.hotkey`, `r
 - fixed-width integer instructions;
 - stack/local/instruction limits.
 
-The companion manifest maps source state names to numeric slots and kinds. It is used only by the Bun control plane.
+The companion manifest maps source state names to numeric slots and effect names/fields to numeric channel IDs. It is used only by the Bun control plane.
 
 ## Wire format and VM
 
@@ -41,6 +43,8 @@ The companion manifest maps source state names to numeric slots and kinds. It is
 The runtime uses a direct source × device × edge × code trigger table, fixed held-input bitmaps, fixed VM stack/locals/output storage, and a fixed-capacity continuation scheduler. Common state/immediate updates bypass stack traffic. A zero-delay instruction run becomes one output batch. Every `sleep.*()` unit helper lowers to one wide/scaled delay opcode, flushes that batch, and yields the handler with an absolute monotonic deadline. The owned host polls ready continuations while continuing to receive new input and control commands.
 
 The lower-level compatibility engine retains synchronous delay behavior for simple embedders.
+
+`EmitEffect` carries a numeric ID and at most eight stack operands. Its payload is an inline fixed array. State opcodes compare before storing and publish only actual changes. Both use statically dispatched injector methods: embedders that do not attach an event sink retain a no-op path that release optimization removes.
 
 ## Owned native host
 
@@ -58,9 +62,11 @@ Stopping the host joins observer/worker threads and releases tracked held synthe
 
 `DynamicInputLane` is best-effort control-plane plumbing for events that truly require JS. `NativeHost.attachDynamicLane()` shares its fixed six-word SPSC ring with the worker. The producer never invokes JavaScript and drops/counts overflow instead of blocking realtime processing. Bun decides when and where to call `drain()`.
 
+`RuntimeEventLane` is the opposite-direction native-to-Bun lane. Its fixed 20-word records carry changed state slots, typed effect payloads, and reload markers. The Bun state cache repairs overflow with one bulk snapshot; transient effects intentionally remain best-effort. The 4 ms event pump exists only while a state/effect subscriber is active. RPC framing and overlay reconciliation start after this boundary and never run on the observer or VM worker.
+
 ## Overlay isolation
 
-The overlay is a companion executable because desktop window event loops need main-thread ownership, especially on macOS. Bun builds a Figma-style auto-layout tree only when a bound state snapshot changes, reconciles stable primitive keys, and sends one coalesced newline-JSON batch. Native code retains primitive nodes, rerasterizes the union of old/new dirty bounds, and uploads only a 256-byte-row-aligned texture region. It shares no renderer lock with input dispatch; renderer exit cannot stop the host.
+The overlay is a companion executable because desktop window event loops need main-thread ownership, especially on macOS. Bun builds a Figma-style auto-layout tree only after a changed-state event (or an explicitly configured polling tick), reconciles stable primitive keys, and sends one coalesced newline-JSON batch. Native code retains primitive nodes, rerasterizes the union of old/new dirty bounds, and uploads only a 256-byte-row-aligned texture region. It shares no renderer lock with input dispatch; renderer exit cannot stop the host.
 
 ## Measurement boundaries
 

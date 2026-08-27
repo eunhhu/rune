@@ -7,12 +7,13 @@ Spellwire는 초기 alpha입니다. 이 문서는 구현된 영역과 플랫폼 
 ## 구현 완료
 
 - TypeScript AST compiler, source diagnostic, portable hotkey parser, paired remap, module-scope named integer/boolean state, direct state-immediate update, native 상태 gate, condition, loop, inline helper, held query, key/mouse intrinsic
-- versioned `SPWR` v4 encoder, v3/v4 decoder와 structural/runtime validation
+- versioned `SPWR` v5 encoder, v3/v4/v5 decoder, fixed-payload effect opcode와 structural/runtime validation
 - bounded native VM stack/local/output batch/instruction budget/fixed trigger table
 - fixed-capacity continuation scheduler: `sleep.us/ms/seconds/minutes/hours()`가 wide/scaled delay opcode 하나로 lowering되고 observer worker를 block하지 않은 채 absolute deadline까지 yield
-- compatibility C ABI와 ABI v4 owned-host lifecycle/reload/scalar·bulk state/permission/error/dispatch/shared ring
+- compatibility C ABI와 ABI v5 owned-host lifecycle/reload/scalar·bulk state/permission/error/dispatch/shared input/event ring
 - Bun FFI `NativeHost`: start/stop, `.ts` memory compile, `.bin` manifest, serialized watch reload, name/kind state preservation
 - native observer에서 shared 6-word SPSC ring으로 연결되는 callback-free `DynamicInputLane`
+- changed state/effect용 callback-free 20-word `RuntimeEventLane`, cached state 복구, 변경 기반 overlay refresh, 인증 local Electron/sidecar RPC
 - Windows low-level keyboard/mouse hook, lock-free 원본 입력 차단, tagged batched `SendInput`
 - macOS active `CGEventTap`, lock-free 원본 입력 차단, permission check, Caps Lock pulse 정규화, private tagged `CGEventPost`, tap recovery
 - Linux evdev discovery/hotplug, dedicated uinput keyboard/mouse. 선택적 원본 입력 relay는 미구현
@@ -37,14 +38,14 @@ macOS와 Windows loopback은 physical-source F19 test dispatch, native F20 injec
 
 ## Capability bit
 
-Windows/macOS의 `spellwire_capabilities()`는 `0x77`입니다.
+Windows/macOS의 `spellwire_capabilities()`는 `0xf7`입니다.
 
 ```text
 HostCallbackInjection | NativeObservation | NativeInjection |
-HostLifecycle | NonBlockingDelay | NativeInputSuppression
+HostLifecycle | NonBlockingDelay | NativeInputSuppression | NativeEventLane
 ```
 
-Linux는 `NativeInputSuppression` 없이 `0x37`을 반환합니다.
+Linux는 `NativeInputSuppression` 없이 `0xb7`을 반환합니다.
 
 renderer는 별도 executable이므로 `NativeOverlay` library bit는 reserved 상태입니다. `NativeOverlayRenderer.start()`가 companion executable을 직접 검증합니다.
 

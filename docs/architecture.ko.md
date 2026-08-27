@@ -10,13 +10,15 @@ Spellwire는 제한 없는 Bun control plane과 제한된 native event execution
 .spellwire.ts
     │ TypeScript AST compilation
     ▼
-SPWR bytecode + named-state manifest
+SPWR bytecode + state/effect manifest
     │ Bun FFI load/reload
     ▼
 platform observer → atomic consume policy → fixed SPSC queue → runtime worker → platform injector
                                                                │
                                                                ├─ fixed continuation deadlines
-                                                               └─ optional SharedArrayBuffer event ring → Bun
+                                                               └─ state/effect SharedArrayBuffer ring → Bun
+                                                                                                      │
+                                                                                                      └─ local RPC → Electron/sidecar
 
 Bun OverlayScene mutations → pipe → separate native retained renderer
 ```
@@ -32,7 +34,7 @@ compiler는 source를 실행하지 않고 parse하며 top-level `rt.hotkey`, `rt
 - fixed-width integer instruction
 - stack/local/instruction limit
 
-별도 manifest는 source state name을 native slot과 kind에 연결하며 Bun control plane에서만 사용합니다.
+별도 manifest는 source state name을 native slot에, effect name/field를 숫자 channel ID에 연결하며 Bun control plane에서만 사용합니다.
 
 ## Wire format과 VM
 
@@ -41,6 +43,8 @@ compiler는 source를 실행하지 않고 parse하며 top-level `rt.hotkey`, `rt
 runtime은 direct source × device × edge × code trigger table, fixed held-input bitmap, fixed VM stack/local/output storage, fixed-capacity continuation scheduler를 사용합니다. 흔한 state/immediate update는 stack traffic을 우회합니다. zero-delay instruction은 한 output batch가 됩니다. 모든 `sleep.*()` unit helper는 wide/scaled delay opcode 하나로 lowering되어 batch를 flush하고 absolute monotonic deadline과 함께 handler를 yield합니다. owned host는 새 input/control command를 계속 받으면서 ready continuation을 poll합니다.
 
 간단한 embedder를 위한 lower-level compatibility engine은 synchronous delay를 유지합니다.
+
+`EmitEffect`는 숫자 ID와 최대 8개의 stack operand를 가지며 payload는 inline fixed array입니다. state opcode는 store 전에 비교하여 실제 변경만 publish합니다. 둘 다 statically dispatched injector method를 사용하므로 event sink를 붙이지 않은 embedder에서는 release optimization이 no-op 경로를 제거합니다.
 
 ## Owned native host
 
@@ -58,9 +62,11 @@ stop은 observer/worker thread를 join하고 추적 중인 synthetic held input�
 
 `DynamicInputLane`은 JavaScript가 꼭 필요한 event를 위한 best-effort control plane입니다. `NativeHost.attachDynamicLane()`은 고정 6-word SPSC ring을 worker와 공유합니다. producer는 JavaScript를 호출하지 않고 full이면 block 대신 drop/count합니다. drain 시점과 thread는 Bun이 선택합니다.
 
+`RuntimeEventLane`은 반대 방향인 native-to-Bun lane입니다. 고정 20-word record가 changed state slot, typed effect payload, reload marker를 전달합니다. Bun state cache는 overflow 뒤 bulk snapshot 한 번으로 복구하고 transient effect는 best-effort로 유지합니다. 4 ms event pump는 state/effect subscriber가 있을 때만 존재합니다. RPC framing과 overlay reconciliation은 이 경계 뒤에서 시작하며 observer나 VM worker에서 실행되지 않습니다.
+
 ## Overlay 격리
 
-desktop window event loop는 특히 macOS에서 main-thread ownership이 필요하므로 overlay는 companion executable입니다. Bun은 bound state snapshot이 바뀔 때만 Figma식 auto-layout tree를 만들고 stable primitive key를 reconcile한 뒤 newline JSON batch 하나를 보냅니다. native는 primitive를 retained하고 old/new dirty bounds 합집합만 rerasterize하며 256-byte row에 정렬된 texture 영역만 upload합니다. input dispatch와 renderer lock을 공유하지 않아 renderer 종료가 host를 멈추지 않습니다.
+desktop window event loop는 특히 macOS에서 main-thread ownership이 필요하므로 overlay는 companion executable입니다. Bun은 changed-state event 뒤(또는 명시한 polling tick)에만 Figma식 auto-layout tree를 만들고 stable primitive key를 reconcile한 뒤 newline JSON batch 하나를 보냅니다. native는 primitive를 retained하고 old/new dirty bounds 합집합만 rerasterize하며 256-byte row에 정렬된 texture 영역만 upload합니다. input dispatch와 renderer lock을 공유하지 않아 renderer 종료가 host를 멈추지 않습니다.
 
 ## 측정 경계
 

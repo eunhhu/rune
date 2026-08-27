@@ -17,7 +17,7 @@ Linux:   target/release/libspellwire_native.so
 ## Version과 capability
 
 ```c
-uint32_t spellwire_abi_version(void);       // 4
+uint32_t spellwire_abi_version(void);       // 5
 uint32_t spellwire_capabilities(void);
 uint32_t spellwire_permission_status(void);
 uint32_t spellwire_request_permissions(void);
@@ -31,11 +31,12 @@ uint32_t spellwire_request_permissions(void);
 1 << 4  HostLifecycle
 1 << 5  NonBlockingDelay
 1 << 6  NativeInputSuppression
+1 << 7  NativeEventLane
 ```
 
-Windows와 macOS는 `NativeOverlay`를 제외한 `0x77`을 반환합니다. Linux evdev backend에는 아직 원본 입력 차단용 exclusive pass-through relay가 없어 `0x37`을 반환합니다. permission bit는 `1 << 0` observe, `1 << 1` inject입니다.
+Windows와 macOS는 `NativeOverlay`를 제외한 `0xf7`을 반환합니다. Linux evdev backend에는 아직 원본 입력 차단용 exclusive pass-through relay가 없어 `0xb7`을 반환합니다. permission bit는 `1 << 0` observe, `1 << 1` inject입니다.
 
-ABI version `4`와 bytecode wire version `4`는 독립적입니다. wire v4는 signed 64-bit/scaled delay encoding과 direct state-immediate opcode를 추가합니다. decoder는 modifier/repeat/consume policy와 optional native state gate를 이미 포함한 wire v3도 계속 읽습니다.
+ABI version `5`와 bytecode wire version `5`는 독립적입니다. wire v5는 fixed-payload effect를 추가하고 wire v4는 signed 64-bit/scaled delay와 direct state-immediate opcode를 추가했습니다. decoder는 wire v3와 v4도 계속 읽습니다.
 
 ## Owned platform host
 
@@ -96,6 +97,27 @@ record: device, code, edge, source, timestamp_ns_low, timestamp_ns_high
 header 4 word 뒤에 `capacity * 6` event word가 옵니다. capacity는 2의 거듭제곱이어야 합니다. native는 record를 저장한 뒤 `write`를 release-store하고 Bun consumer는 acquire-load합니다. full ring은 `dropped`를 증가시키며 unread event를 덮어쓰지 않습니다.
 
 null pointer는 synchronous detach입니다. attached storage는 detach 또는 host stop까지 살아 있어야 하며 `NativeHost.attachDynamicLane()`은 이 lifetime 동안 `SharedArrayBuffer` view를 보관합니다.
+
+## Shared state/effect ring
+
+```c
+int32_t spellwire_host_set_event_ring(
+  SpellwireHost *host,
+  int32_t *words,
+  size_t word_len,
+  size_t capacity
+);
+```
+
+native-to-control-plane ring은 같은 4-word header와 고정 20-word record를 사용합니다.
+
+```text
+kind 1 state:  kind, slot, 1, 0, value_low, value_high, ...
+kind 2 effect: kind, effect_id, length, 0, value0_low, value0_high, ... value7_high
+kind 3 reload: kind, 0, 0, 0, ...
+```
+
+state record는 저장된 `i64`가 실제로 바뀔 때만 생성됩니다. effect payload는 최대 8개입니다. full ring은 `dropped`만 증가시키고 VM을 block하지 않습니다. durable state는 `spellwire_host_state_snapshot`으로 복구하지만 transient effect는 유실될 수 있습니다. null pointer는 synchronous detach입니다.
 
 ## Compatibility engine
 

@@ -40,6 +40,21 @@ Module-scope `const` declarations are folded as compile-time constants when poss
 
 Spellwire numbers on the realtime plane are signed 64-bit integers. Numeric literals must be safe JavaScript integers at compile time. Booleans are represented as native integer truth values.
 
+## Typed effects
+
+Module-scope `const channel = effect("name", { ...schema })` declarations create transient channels. Inside realtime handlers, `channel.emit({ ...payload })` requires one object literal with exactly the schema fields. Schemas accept up to eight `"number"` or `"boolean"` fields.
+
+The object syntax exists only for source readability and type checking. Lowering pushes fields in schema order and emits one `EmitEffect` instruction with a numeric channel ID and arity. Native execution uses an inline fixed `i64` array; property names and JavaScript objects do not enter bytecode or the VM.
+
+```ts
+const changed = effect("changed", { count: "number", active: "boolean" });
+
+rt.hotkey("F6", () => {
+  count += 1;
+  changed.emit({ count, active });
+});
+```
+
 ## Trigger-level state gates
 
 Use `when` when the same boolean state must control both handler execution and original-input suppression:

@@ -17,6 +17,7 @@
 | --- | --- |
 | [자동화 의미론](automation.ko.md) | suppression 규칙, 상태 gate, 출력 helper, 시간 단위, AutoHotkey migration matrix |
 | [Realtime TypeScript](typescript-runtime.ko.md) | compiler 문법, 반복문, helper, 진단, resource budget |
+| [Effect와 RPC](effects-rpc.ko.md) | typed 일회성 event, changed-state 구독, Electron/sidecar IPC, 성능 경계 |
 | [Overlay 설계](overlay.ko.md) | 상태 binding, layout, style, window 정책, reconciliation, renderer 격리 |
 | [Live native host](live-host.ko.md) | host lifecycle, dynamic input lane, reload, 종료, library 탐색 |
 | [플랫폼 상태](platforms.ko.md) | backend 기능, 권한, 검증 상태, compositor 주의점 |

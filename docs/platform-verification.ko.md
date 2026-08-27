@@ -64,7 +64,7 @@ bun run inspect:runtime
 {
   "abiVersion": 4,
   "nativeLibraryPath": "/.../target/release/libspellwire_native.dylib",
-  "capabilities": { "mask": "0x77", "enabled": ["..."] },
+  "capabilities": { "mask": "0xf7", "enabled": ["..."] },
   "permissions": { "mask": "0x3", "observe": true, "inject": true }
 }
 ```
@@ -134,7 +134,7 @@ bun run build:native
 bun run inspect:runtime
 ```
 
-library는 `target\release\spellwire_native.dll`, ABI는 `4`, capabilities는 `0x77`이어야 합니다. Windows는 low-level hook과 `SendInput`에 사전 permission prompt가 없으므로 현재 두 permission bit를 granted로 보고합니다.
+library는 `target\release\spellwire_native.dll`, ABI는 `5`, capabilities는 `0xf7`이어야 합니다. Windows는 low-level hook과 `SendInput`에 사전 permission prompt가 없으므로 현재 두 permission bit를 granted로 보고합니다.
 
 이 값은 UIPI를 우회하지 않습니다. 일반 권한 Spellwire process는 관리자 권한 target에 입력을 주입할 수 없습니다. 먼저 일반 desktop application을 대상으로 검증하십시오. 관리자 target 검증이 필요하면 Spellwire를 같은 integrity level에서 실행하고 보고서에 명시하십시오. elevation을 일반 설치 요구 사항으로 취급하지 마십시오.
 
@@ -168,7 +168,7 @@ bun run inspect:runtime
 
 `observe: true`는 읽을 수 있는 evdev device를 하나 이상 발견했다는 뜻입니다. `inject: true`는 `/dev/uinput`을 열었다는 뜻입니다. Linux의 `inspect:runtime -- --request-permissions`는 rule을 설치하거나 prompt를 표시하지 않고 같은 resource를 다시 조회합니다.
 
-ABI는 `4`, capabilities는 `0x37`이어야 합니다. Linux 원본 입력 차단은 아직 구현되지 않았으므로 이 대상 장비 검증에서 `consume`이 source event를 숨길 것으로 기대하면 안 됩니다.
+ABI는 `5`, capabilities는 `0xb7`이어야 합니다. Linux 원본 입력 차단은 아직 구현되지 않았으므로 이 대상 장비 검증에서 `consume`이 source event를 숨길 것으로 기대하면 안 됩니다.
 
 ### 2. 제공 udev rule 검토 및 선택적 설치
 
@@ -222,12 +222,12 @@ bun run test:overlay-live
 
 `scripts/platform-loopback.ts`는 다음 순서로 동작합니다.
 
-1. `examples/platform-loopback.spellwire.ts`를 ABI v4로 load
+1. `examples/platform-loopback.spellwire.ts`를 ABI v5로 load
 2. observe와 inject permission 확인
-3. 64-record `DynamicInputLane` 연결
+3. 64-record `DynamicInputLane` 연결, changed state와 typed `loopback` effect 구독
 4. physical-source F19를 VM에 명시적으로 dispatch
 5. VM이 실제 OS backend로 tagged F20 주입
-6. 돌아온 synthetic F20을 observe하고 명명 상태를 `1`로 갱신
+6. 돌아온 synthetic F20을 observe하고 명명 상태를 `1`로 갱신한 뒤 두 runtime-lane 알림 확인
 7. F18에서 delayed held F20 sequence 생성
 8. release deadline 전에 program reload
 9. reload가 held synthetic F20 release를 정확히 한 번 보냈는지 확인

@@ -33,6 +33,7 @@ bun run build  # dist/main.spellwire.bin과 manifest 생성
 | 입력을 차단하는 hotkey | `rt.hotkey("Ctrl+Shift+K", handler)` |
 | key remap | `rt.remap("CapsLock", "Escape")` |
 | 영속 상태 | module-scope `let enabled = true` |
+| 일회성 typed event | `const changed = effect("changed", schema)`, 이후 `changed.emit(payload)` |
 | 키보드/마우스 출력 | `tapKey`, `keyDown`, `clickMouse`, `moveMouse`, `wheelMouse` |
 | 지연 | `sleep.ms(250)`, `sleep.seconds(2)` 또는 단위별 helper |
 | 입력 + watch + UI 시작 | `Spellwire.start(options)` |
@@ -41,6 +42,7 @@ bun run build  # dist/main.spellwire.bin과 manifest 생성
 | 상태 기반 UI | `overlay: state => ...`, `ui.bind`, `ui.when` |
 | UI style | `width`, `height`, `padding`, `gap`, `fill`, `stroke`, `shadow`, `opacity`, font prop |
 | Overlay window | `overlayOptions.window` (`alwaysOnTop`, `transparent`, `focusable`, `clickThrough` 등) |
+| Electron/sidecar 연동 | `SpellwireRpcServer`, `SpellwireRpcClient` |
 
 signature, 기본값, option 표, 완전한 state-to-overlay 앱, native window 정책과 플랫폼별 주의점은 **[API 레퍼런스](docs/api.ko.md)**에서 확인할 수 있습니다.
 
@@ -74,6 +76,8 @@ rt.remap("CapsLock", "Escape", { when: () => enabled });
 ```
 
 portable 문자열이 modifier 보일러플레이트를 없애고, `when`이 action과 원본 입력 통과를 함께 gate하며, remap은 down/up 전환을 자동으로 한 쌍 생성합니다. 실시간 핸들러가 참조하는 모듈 범위 정수/불리언 `let` 선언은 영속 네이티브 상태가 됩니다. 더 큰 상태 머신에는 조건, 반복, 산술, helper, held 조회, delay, low-level `rt.onKey*`/`rt.onMouse*`도 그대로 사용할 수 있습니다. 실시간 핸들러 밖의 일반 Bun 코드는 제한 없는 control plane입니다.
+
+state는 최신 값을 보관하고 effect는 사건이 발생했다는 사실을 전달합니다. 둘 다 native VM에서는 숫자 ID와 고정 `i64` payload로 compile됩니다. worker는 실제로 바뀐 state와 effect만 미리 할당한 SPSC lane에 기록하므로 기본 overlay는 매 frame native state를 polling하지 않고 변경이 있을 때만 갱신됩니다. local RPC는 직렬화, socket, JavaScript를 input thread에 넣지 않은 채 같은 state/effect를 Electron이나 sidecar에 전달합니다. 전체 API와 성능 경계는 [Effect와 RPC](docs/effects-rpc.ko.md)에 정리되어 있습니다.
 
 ## 빌드
 
@@ -119,12 +123,14 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 | --- | --- |
 | TypeScript AOT 컴파일러 | 구현 완료 |
 | 영속 정수/불리언 상태 | 구현 완료 |
+| 고정 payload typed effect와 changed-state event lane | 구현 완료 |
 | 조건, 반복, 대입, held 조회, helper 함수 | 구현 완료 |
 | portable consuming hotkey, release trigger, 상태 gate, remap | Windows/macOS 구현, Linux suppression 미구현 |
 | 네이티브 VM, 버전 wire format, 고정 출력 batch | 구현 완료 |
 | 네이티브 inspector/simulator | 구현 완료 |
 | 명시적 dispatch 및 owned-host C ABI | 구현 완료 |
 | Bun FFI 호스트, 명명 상태, watch/reload, SPSC lane | 구현 완료 |
+| Electron/sidecar용 인증 local RPC | 구현 완료 |
 | Windows `SendInput`, macOS `CGEventPost`, Linux evdev/uinput | 구현 완료, macOS 실제 검증 완료, Windows 대화형 루프백 검증 완료, Windows 물리 입력 차단과 Linux 대상 실행은 미검증 |
 | 상태 기반 auto-layout overlay, modern style, configurable native window 정책, retained dirty update | 구현 완료, macOS와 Windows lifecycle/window-policy smoke 검증 완료, Windows 시각적 투명도와 Linux compositor 검증은 미완료 |
 | 플랫폼별 prebuilt/signing workflow | 구현 완료, 배포 자격 증명 필요 |
@@ -156,6 +162,7 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 - [한국어 문서 목차](docs/index.ko.md)
 - [자동화 의미론과 AutoHotkey 마이그레이션](docs/automation.ko.md)
 - [Overlay renderer와 성능 설계](docs/overlay.ko.md)
+- [Effect, 상태 동기화, local RPC](docs/effects-rpc.ko.md)
 - [Realtime compiler subset](docs/typescript-runtime.ko.md)
 - [Live native host 내부 구조](docs/live-host.ko.md)
 - [아키텍처](docs/architecture.ko.md), [네이티브 C ABI](docs/native-abi.ko.md), [플랫폼 상태](docs/platforms.ko.md)
@@ -173,6 +180,7 @@ cargo build --workspace --release --locked
 
 ```bash
 bun run bench
+bun run bench -- 1000000 --effect
 bun run bench:platform -- 10000
 ```
 

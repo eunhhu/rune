@@ -126,6 +126,7 @@ import {
   Modifier,
   MouseButton,
   clickMouse,
+  effect,
   keyDown,
   keyHeld,
   keyUp,
@@ -135,6 +136,7 @@ import {
   moveMouse,
   parseHotkey,
   rt,
+  readRuntimeEventI64,
   sleep,
   sleepHours,
   sleepMinutes,
@@ -144,6 +146,8 @@ import {
   tapKey,
   ui,
   wheelMouse,
+  SpellwireRpcClient,
+  SpellwireRpcServer,
 } from "spellwire";
 ```
 
@@ -164,17 +168,19 @@ The package root exports the following public names. The detailed sections below
 | Keys and hotkeys | `Key`, `Modifier`, `MouseButton`, `InputSource`, `parseHotkey`, `ParsedHotkey` |
 | Application | `Spellwire`, `SpellwireStartOptions` |
 | Realtime registration | `rt`, `HotkeyOptions`, `RemapOptions`, `RealtimeOptions`, `RealtimeRegistration` |
+| Realtime effects | `effect`, `RealtimeEffect`, `EffectSchema`, `EffectPayload`, `EffectValueKind` |
 | Realtime output | `keyDown`, `keyUp`, `tapKey`, `keyHeld`, `mouseDown`, `mouseUp`, `clickMouse`, `mouseHeld`, `moveMouse`, `wheelMouse`, `sleep`, `sleepUs`, `sleepMs`, `sleepSeconds`, `sleepMinutes`, `sleepHours` |
 | Fallback testing | `getFallbackRealtimeRegistrations`, `withRealtimeActionSink`, `RealtimeActionSink` |
-| Runtime and dynamic lane | `DynamicInputLane`, `EventSource`, `InputDevice`, `InputEdge`, `InputEvent`, `InputHandler`, `NativeState`, `NativeStateBridge`, `SpscInt32Ring` |
+| Runtime lanes | `DynamicInputLane`, `RuntimeEventLane`, `RuntimeEventKind`, `RUNTIME_EVENT_WORDS`, `readRuntimeEventI64`, `RawEffectHandler`, `StateChangeHandler`, `EventSource`, `InputDevice`, `InputEdge`, `InputEvent`, `InputHandler`, `NativeState`, `NativeStateBridge`, `SpscInt32Ring` |
 | Overlay runtime | `Overlay`, `OverlayView`, `OverlayScene`, `NativeOverlayRenderer`, `OverlayMountOptions`, `OverlayBindingOptions`, `OverlayReadable`, `OverlayStateSource` |
 | Overlay UI | `ui`, `OverlayChild`, `OverlayElement`, `OverlayLayoutProps`, `OverlayFrameProps`, `OverlayTextProps`, `OverlayEllipseProps`, `OverlayDotProps`, `OverlayDividerProps`, `OverlayBadgeProps`, `OverlayAlign`, `OverlayJustify`, `OverlayInsets`, `OverlayLength` |
 | Overlay primitives | `OverlayNode`, `OverlayNodeId`, `OverlayMutation`, `OverlayText`, `OverlayRect`, `OverlayEllipse`, `OverlayLine`, `OverlayFont`, `OverlayStroke`, `OverlayShadow` |
 | Overlay process and window | `OverlayWindowOptions`, `ResolvedOverlayWindowOptions`, `NativeOverlayOptions`, `NativeOverlayReady`, `overlayExecutableFileName`, `resolveOverlayExecutable`, `resolveOverlayWindowOptions` |
 | Native host | `NativeHost`, `NativeHostOptions`, `NativeHostWatcher`, `NativeWatchOptions`, `NativeManifest`, `ProgramDescriptor`, `NativeRuntimeInfo`, `NativeStateManifestEntry`, `NativeStateSnapshot` |
 | Native capabilities | `NativeCapability`, `NativePermission`, `NATIVE_ABI_VERSION`, `inspectNativeRuntime`, `loadProgramDescriptor`, `nativeLibraryFileName`, `resolveNativeLibrary` |
+| Effects and RPC | `NativeEffects`, `NativeEffectField`, `NativeEffectHandler`, `NativeEffectManifestEntry`, `NativeEffectPayload`, `NativeRawEffectHandler`, `SpellwireRpcServer`, `SpellwireRpcServerOptions`, `SpellwireRpcClient`, `SpellwireRpcClientOptions`, `RpcMethod`, `RpcEventHandler` |
 | Compiler | `compileSource`, `SpellwireCompileError`, `CompileDiagnostic`, `CompileOptions`, `CompileResult`, `encodeModule` |
-| Wire format and IR | `Opcode`, `SourceFilter`, `TriggerFlag`, `WIRE_VERSION`, `WIRE_HEADER_SIZE`, `WIRE_HANDLER_SIZE`, `WIRE_INSTRUCTION_SIZE`, `CompiledModule`, `Handler`, `Instruction`, `StateSlot` |
+| Wire format and IR | `Opcode`, `SourceFilter`, `TriggerFlag`, `WIRE_VERSION`, `WIRE_HEADER_SIZE`, `WIRE_HANDLER_SIZE`, `WIRE_INSTRUCTION_SIZE`, `CompiledModule`, `EffectSlot`, `EffectField`, `Handler`, `Instruction`, `StateSlot` |
 
 ## Persistent realtime state
 
@@ -194,7 +200,33 @@ Assignments, compound assignments, `++`/`--`, integer arithmetic, comparisons, b
 
 State survives dispatches. Source reload preserves values by matching state name and kind unless `preserveState: false` is selected. `when` accepts one module-scope boolean state or its negation because the native suppression table must evaluate the same gate before dispatch.
 
-Outside realtime handlers, use `app.host.state("name")`, `app.host.states.name`, or one bulk `app.host.snapshotStates()`. Those are control-plane FFI calls, not realtime opcodes.
+Outside realtime handlers, use `app.host.state("name")`, `app.host.states.name`, or cached `app.host.snapshotStates()`. Scalar access uses control-plane FFI; snapshots use the event-maintained cache with bulk FFI only for initial/recovery reads. None are realtime opcodes.
+
+## Effects, state updates, and RPC
+
+Use state for a current value and an effect for a transient occurrence:
+
+```ts
+const completed = effect("completed", {
+  count: "number",
+  enabled: "boolean",
+});
+
+rt.hotkey("F6", () => {
+  count += 1;
+  completed.emit({ count, enabled });
+});
+
+const stop = app.host.effects.on("completed", (payload) => {
+  console.log(payload.count, payload.enabled);
+});
+```
+
+An effect schema supports up to eight `"number"`/`"boolean"` fields. The compiler lowers `emit` to one fixed-width `EmitEffect` opcode. `app.host.effects.onRaw(name, handler)` passes the reused 20-word lane record directly; read `i64` values with `readRuntimeEventI64(record, offset)` and do not retain the record.
+
+`app.host.onStateChange(handler)` runs only after a native state value changes. `app.host.pollEvents(maxEvents?)` provides manual draining. `snapshotStates()` normally reads the maintained local cache and performs one bulk FFI recovery after overflow/reload.
+
+For Electron or sidecars, start `SpellwireRpcServer` from `spellwire/rpc/server` and connect with `SpellwireRpcClient` from `spellwire/rpc`. It supports state get/set/snapshot/subscription, effect subscription, and named custom methods over an authenticated local socket/named pipe. [Effects and RPC](effects-rpc.md) contains executable server/client examples, security rules, overflow behavior, and the allocation-free raw path.
 
 ## Realtime registration
 
@@ -495,7 +527,10 @@ The host resolves a packaged platform library, `SPELLWIRE_NATIVE_LIBRARY`, or wo
 | `reload({ preserveState? })` | Serialize reload and preserve running state by compatible manifest name/kind by default |
 | `watch(options?)` | Watch the input file with configurable debounce and reload callbacks |
 | `state(name)` / `states[name]` | Access a named `NativeState` from the current manifest |
-| `snapshotStates()` | Read every named state with one bulk native worker command |
+| `snapshotStates()` | Read the maintained named-state cache; bulk native recovery after attach, overflow, or reload |
+| `onStateChange(handler)` | Subscribe to actual changed-state records; starts the event pump while retained |
+| `effects.on(name, handler)` / `effects.onRaw(...)` | Subscribe to structured or reused-record effect payloads |
+| `pollEvents(maxEvents?)` | Manually drain state/effect records without enabling a timer |
 | `attachDynamicLane(lane)` | Publish observed input into the lane's six-word shared records |
 | `dispatch(...)` | Explicitly submit a VM input for tests or custom embedders |
 | `close()` | Stop if needed, free native ownership, and close the dynamic library |
@@ -528,9 +563,11 @@ await app.untilSignal();
 | `onReload` | — | Called after a successful watched reload |
 | `onError` | console/default propagation | Receives watch or asynchronous overlay failures |
 | `overlay(state)` | — | Build an overlay from one shallow named-state snapshot |
-| `overlayOptions` | — | Overlay polling, renderer startup, and native window options listed below |
+| `overlayOptions` | — | Change-driven refresh policy, renderer startup, and native window options listed below |
 | `nativeLibraryPath` | auto-discovered | Explicit native library override |
 | `manifestPath` | adjacent manifest | Explicit manifest for compiled binary input |
+| `eventCapacity` | `1024` | Power-of-two capacity of the native-to-Bun state/effect ring |
+| `eventPollIntervalMs` | `4` | Drain interval used only while state/effect subscribers exist; 1–1000 ms |
 
 | App member | Contract |
 | --- | --- |
@@ -652,7 +689,7 @@ const overlay = await Overlay.mount(
 
 `ui.bind` compares with shallow equality by default; `options.equals(left, right)` may replace it. Each unique source is read once per reconciliation pass. An unchanged pass performs no layout or renderer IPC. A changed binding reruns only its render callback, then the resolved tree is laid out and keyed primitives are diffed. Only changed primitives cross the process boundary; the native renderer redraws only affected bounds.
 
-`Spellwire.start({ overlay })` binds one bulk host snapshot to the root callback. Any named-state change reruns that root callback. This is React-like render/reconcile behavior, not automatic signal dependency tracking. Use direct per-state `ui.bind` when callback-level granularity matters.
+`Spellwire.start({ overlay })` binds the cached host snapshot to the root callback. A changed-state lane record reruns that root callback. This is React-like render/reconcile behavior, not automatic signal dependency tracking. Use direct per-state `ui.bind` when callback-level granularity matters.
 
 ### Overlay lifecycle
 
@@ -674,7 +711,7 @@ await overlay.close();
 
 | `OverlayMountOptions` | Default | Contract |
 | --- | --- | --- |
-| `fps` | `30` | Binding polls per second, `0` for manual refresh; valid range 0–240 |
+| `fps` | event-driven in `Spellwire.start`; `30` in direct `Overlay.mount` | Set an explicit periodic binding rate, or `0` for manual refresh; valid range 0–240 |
 | `executablePath` | auto-discovered | Explicit native renderer path |
 | `readyTimeoutMs` | `5_000` | Renderer startup timeout |
 | `window` | overlay-safe defaults | Native window policy; see the table below |

@@ -51,6 +51,32 @@ await app.untilSignal();
 
 두 code block은 같은 `src/main.ts`에 둘 수 있고 `rt.*` handler만 native VM으로 들어갑니다.
 
+## 상태 변경, effect, app 연동
+
+현재 값을 유지해야 하면 state를, 한 번 발생한 사건을 전달하려면 effect를 사용합니다.
+
+```ts
+import { Spellwire, effect, rt } from "spellwire";
+
+let count = 0;
+let enabled = true;
+const activated = effect("activated", { count: "number", enabled: "boolean" });
+
+rt.hotkey("F6", () => {
+  count += 1;
+  activated.emit({ count, enabled });
+});
+
+const app = await Spellwire.start({ input: import.meta.file });
+const stop = app.host.effects.on("activated", ({ count, enabled }) => {
+  console.log({ count, enabled });
+});
+```
+
+compiler는 `emit`을 inline `[i64; 8]` payload를 가진 fixed-width native opcode 하나로 lowering합니다. 실제로 바뀐 state와 effect는 realtime 실행 뒤 preallocated SPSC lane으로 전달됩니다. input callback에서는 JavaScript, socket, JSON을 실행하지 않습니다. `app.host.onStateChange()`로 fine-grained state update를 받을 수 있고 기본 `Spellwire.start({ overlay })` 경로는 변경이 생긴 뒤에만 refresh합니다.
+
+Electron/Node build나 sidecar는 `spellwire/rpc/server`의 `SpellwireRpcServer`와 `spellwire/rpc`의 `SpellwireRpcClient`로 인증된 local socket/named pipe에 연결합니다. client subpath에는 `bun:ffi` dependency가 없습니다. allocation-free raw 구독, 완전한 server/client code, 보안과 overflow 규칙은 [Effect, 상태 동기화, RPC](https://github.com/eunhhu/spellwire/blob/main/docs/effects-rpc.ko.md)에 있습니다.
+
 자세한 내용:
 
 - [라이브 네이티브 호스트](https://github.com/eunhhu/spellwire/blob/main/docs/live-host.ko.md)
@@ -58,3 +84,4 @@ await app.untilSignal();
 - [API 레퍼런스](https://github.com/eunhhu/spellwire/blob/main/docs/api.ko.md)
 - [Hotkey와 AutoHotkey 마이그레이션](https://github.com/eunhhu/spellwire/blob/main/docs/automation.ko.md)
 - [상태 기반 오버레이](https://github.com/eunhhu/spellwire/blob/main/docs/overlay.ko.md)
+- [Effect, 상태 동기화, RPC](https://github.com/eunhhu/spellwire/blob/main/docs/effects-rpc.ko.md)

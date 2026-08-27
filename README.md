@@ -43,6 +43,7 @@ Generated projects keep realtime handlers and the state-driven modern overlay to
 | Consuming hotkey | `rt.hotkey("Ctrl+Shift+K", handler)` |
 | Key remap | `rt.remap("CapsLock", "Escape")` |
 | Persistent state | module-scope `let enabled = true` |
+| Transient typed event | `const changed = effect("changed", schema)`, then `changed.emit(payload)` |
 | Keyboard/mouse output | `tapKey`, `keyDown`, `clickMouse`, `moveMouse`, `wheelMouse` |
 | Delay | `sleep.ms(250)`, `sleep.seconds(2)`, or unit-specific helpers |
 | Start input + watch + UI | `Spellwire.start(options)` |
@@ -51,6 +52,7 @@ Generated projects keep realtime handlers and the state-driven modern overlay to
 | State-bound UI | `overlay: state => ...`, `ui.bind`, `ui.when` |
 | UI styling | `width`, `height`, `padding`, `gap`, `fill`, `stroke`, `shadow`, `opacity`, font props |
 | Overlay window | `overlayOptions.window` (`alwaysOnTop`, `transparent`, `focusable`, `clickThrough`, …) |
+| Electron/sidecar bridge | `SpellwireRpcServer`, `SpellwireRpcClient` |
 
 See the **[API reference](docs/api.md)** for signatures, defaults, option tables, a complete state-to-overlay application, native window policy, and platform notes.
 
@@ -78,6 +80,8 @@ rt.remap("CapsLock", "Escape", { when: () => enabled });
 ```
 
 Portable strings replace modifier boilerplate, `when` gates action and pass-through together, and remaps emit paired down/up transitions automatically. Module-scope integer and boolean `let` declarations referenced by realtime handlers become persistent native state. Conditions, loops, arithmetic, helper functions, held-input queries, delays, and low-level `rt.onKey*`/`rt.onMouse*` registrations remain available when a larger state machine needs them. Ordinary Bun code outside realtime handlers remains unrestricted control-plane TypeScript.
+
+State holds the latest value; an effect reports that something happened. Both compile to numeric IDs and fixed `i64` payloads in the native VM. The worker publishes only actual state changes and effects through a preallocated SPSC lane, so the default overlay refreshes on changes instead of polling native state every frame. Local RPC can expose the same state/effects to Electron or a sidecar without putting serialization, sockets, or JavaScript on the input thread. See [Effects and RPC](docs/effects-rpc.md) for the complete API and performance boundaries.
 
 ## Build
 
@@ -125,12 +129,14 @@ The CLI checks/requests platform permissions before starting. `Ctrl+C` stops the
 | --- | --- |
 | TypeScript AOT compiler | Implemented |
 | Persistent integer/boolean state | Implemented |
+| Fixed-payload typed effects and changed-state event lane | Implemented |
 | Conditions, loops, assignments, held checks, helper functions | Implemented |
 | Portable consuming hotkeys, release triggers, state gates, and remaps | Windows/macOS implemented; Linux suppression pending |
 | Native VM, versioned wire format, and fixed output batches | Implemented |
 | Native inspector/simulator | Implemented |
 | C ABI with explicit and owned-host lifecycle APIs | Implemented |
 | Bun FFI host, named state, watch/reload, and SPSC dynamic lane | Implemented |
+| Authenticated local RPC for Electron/sidecars | Implemented |
 | Windows hooks/`SendInput`, macOS event tap/`CGEventPost`, Linux evdev/uinput | Implemented; macOS live-verified; Windows interactive loopback verified; Windows physical suppression and Linux target runs pending |
 | State-driven auto-layout overlay, modern styling, configurable native window policy, retained dirty updates | Implemented; macOS and Windows lifecycle/window-policy smoke verified; Windows visual transparency and Linux compositor checks pending |
 | Cross-platform prebuilt artifact/signing workflow | Implemented; release credentials required |
@@ -162,6 +168,7 @@ Optional deep dives:
 - [Documentation index](docs/index.md)
 - [Automation semantics and AutoHotkey migration](docs/automation.md)
 - [Overlay renderer and performance design](docs/overlay.md)
+- [Effects, state synchronization, and local RPC](docs/effects-rpc.md)
 - [Realtime compiler subset](docs/typescript-runtime.md)
 - [Live native host internals](docs/live-host.md)
 - [Architecture](docs/architecture.md), [Native C ABI](docs/native-abi.md), and [Platforms](docs/platforms.md)
@@ -181,6 +188,7 @@ Run the native core benchmark:
 
 ```bash
 bun run bench
+bun run bench -- 1000000 --effect
 bun run bench:platform -- 10000
 ```
 

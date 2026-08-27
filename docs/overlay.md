@@ -68,7 +68,7 @@ The runnable repository version is [`examples/state-overlay.ts`](../examples/sta
 ## How a native state change reaches the screen
 
 1. A realtime handler updates a persistent native state slot; JavaScript is not called from input dispatch.
-2. The overlay controller reads all named slots with one `spellwire_host_state_snapshot` FFI command at the configured control-plane rate (30 Hz by default).
+2. The native worker publishes only changed state through the SPSC event lane, and `Spellwire.start` reads the maintained named-state cache after that change.
 3. If the shallow state snapshot is unchanged, layout and renderer IPC are skipped.
 4. If it changed, the `overlay(state)` function returns a lightweight element tree.
 5. Stable keys/path positions reconcile that tree against retained primitives. Unchanged primitives emit no mutation.
@@ -77,7 +77,7 @@ The runnable repository version is [`examples/state-overlay.ts`](../examples/sta
 
 This path is separate from the realtime input callback. Static overlays create no JavaScript timer, per-frame callback, or recurring IPC.
 
-For manual refresh, disable polling and update only at known control-plane boundaries:
+`Spellwire.start({ overlay })` subscribes to changed-state records and creates no overlay polling timer by default. For fully manual refresh, set zero explicitly and update only at known control-plane boundaries:
 
 ```ts
 const app = await Spellwire.start({
@@ -90,7 +90,7 @@ await app.refreshOverlay();
 
 ## Reactivity model
 
-The root `overlay(state)` callback is React-like render/reconcile: one bulk named-state snapshot is compared shallowly, and any changed slot reruns that root callback. It is not automatic signal dependency tracking. The retained layer is still fine-grained: keyed primitives are compared individually, unchanged nodes produce no IPC, and the renderer redraws only affected bounds.
+The root `overlay(state)` callback is React-like render/reconcile: one cached named-state snapshot is compared shallowly, and a changed slot reruns that root callback. It is not automatic signal dependency tracking. The retained layer is still fine-grained: keyed primitives are compared individually, unchanged nodes produce no IPC, and the renderer redraws only affected bounds.
 
 For callback-level fine granularity, use `ui.bind(host.states.enabled, render)` or another narrow readable source. Only the changed binding callback reruns. This explicit split avoids proxies, dependency tracking, allocations, and JavaScript work in the realtime input path.
 
@@ -206,9 +206,9 @@ const overlay = await Overlay.mount(
 );
 ```
 
-Multiple bindings to the same source are read once per reconciliation pass. Prefer binding the host once when several values are displayed; it uses one bulk native snapshot instead of one call per state.
+Multiple bindings to the same source are read once per reconciliation pass. Prefer binding the host once when several values are displayed; it reads one maintained cache instead of one FFI call per state.
 
-`OverlayMountOptions.fps` accepts 0–240; zero means manual refresh. `executablePath`, `readyTimeoutMs`, and `window` control native startup, while `onError` handles asynchronous refresh failures.
+`OverlayMountOptions.fps` accepts 0–240; zero means manual refresh. Direct `Overlay.mount` defaults to 30, while `Spellwire.start` uses changed-state events unless an explicit `fps` is supplied. `executablePath`, `readyTimeoutMs`, and `window` control native startup, while `onError` handles asynchronous refresh failures.
 
 ## Low-level retained escape hatch
 
@@ -220,8 +220,8 @@ Use this layer only when another layout engine already provides final coordinate
 
 - no JavaScript call from realtime input dispatch;
 - no layout, IPC, or renderer work when state and scene are unchanged;
-- one bulk state snapshot per poll, regardless of named-state count, with the frozen JS snapshot reused while values stay equal;
-- polling ticks coalesce instead of building a backlog when a refresh takes longer than its interval;
+- no default overlay polling timer in `Spellwire.start`; changed state triggers one cached snapshot reconciliation;
+- explicit polling ticks coalesce instead of building a backlog when a refresh takes longer than its interval;
 - one binding read per unique source;
 - keyed primitive equality checks without JSON hashing;
 - one coalesced IPC batch and native redraw per update;

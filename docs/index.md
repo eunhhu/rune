@@ -17,6 +17,7 @@ Choose a guide by task.
 | --- | --- |
 | [Automation semantics](automation.md) | Suppression rules, state gates, output helpers, timing, and the AutoHotkey migration matrix |
 | [Realtime TypeScript](typescript-runtime.md) | Compiler syntax, loops, helpers, diagnostics, and resource budgets |
+| [Effects and RPC](effects-rpc.md) | Typed transient events, changed-state subscriptions, Electron/sidecar IPC, and performance boundaries |
 | [Overlay design](overlay.md) | State binding, layout, styling, window policy, reconciliation, and renderer isolation |
 | [Live native host](live-host.md) | Host lifecycle, dynamic input lane, reload, shutdown, and library resolution |
 | [Platform status](platforms.md) | Backend capabilities, permissions, verification status, and compositor notes |

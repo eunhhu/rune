@@ -63,7 +63,7 @@ Linux:   target/release/libspellwire_native.so
 bun run inspect:runtime
 ```
 
-정상 상태는 ABI `4`, `permissions.observe: true`, `permissions.inject: true`입니다. Windows/macOS capability mask는 `0x77`, 원본 입력 차단이 아직 없는 Linux는 `0x37`입니다. Windows UIPI는 대상 process에 따라 달라지고, macOS는 두 privacy grant가 필요하며, Linux는 device file 접근 권한이 필요합니다.
+정상 상태는 ABI `5`, `permissions.observe: true`, `permissions.inject: true`입니다. Windows/macOS capability mask는 `0xf7`, 원본 입력 차단이 아직 없는 Linux는 `0xb7`입니다. Windows UIPI는 대상 process에 따라 달라지고, macOS는 두 privacy grant가 필요하며, Linux는 device file 접근 권한이 필요합니다.
 
 ## CLI 명령
 
@@ -301,6 +301,14 @@ capacity는 2 이상 2^31 이하의 2의 거듭제곱이어야 합니다. ring�
 `drain()`은 소비한 record 수를 반환하며 같은 lane에서 reentrant하게 호출할 수 없습니다. dispatch 중 handler 추가/제거는 현재 snapshot이 아니라 다음 event부터 적용됩니다.
 
 `host.dispatch(...)`는 test와 custom embedder가 VM input을 명시적으로 전달하는 API입니다. 실제 물리 device event나 global observer를 대체하지 않습니다.
+
+## State/effect 수신과 다른 app 연동
+
+`NativeHost`는 첫 consumer가 생길 때 20-word `RuntimeEventLane`을 lazy attach합니다. `host.onStateChange`, `host.effects.on`, allocation-free `host.effects.onRaw`를 사용할 수 있습니다. consumer가 생기면 기본 4 ms drain pump가 시작되고 마지막 consumer를 제거하면 pump를 중지하고 lane을 detach합니다. `eventCapacity`와 `eventPollIntervalMs`로 lane을 조절할 수 있습니다. 기존 event loop가 drain을 소유해야 하면 `host.pollEvents()`가 timer 없이 lane을 attach합니다.
+
+이 lane은 native-to-Bun이며 `DynamicInputLane`과 분리되어 있습니다. 실제 state 변경, fixed `i64` effect, reload marker만 전달합니다. state overflow는 bulk snapshot으로 복구하고 effect는 transient로 유지합니다.
+
+Electron이나 sidecar에 노출하려면 인증 local `SpellwireRpcServer`와 Node 호환 `SpellwireRpcClient`를 사용합니다. 전체 코드와 전달 규칙은 [Effect와 RPC](effects-rpc.ko.md)에 있습니다.
 
 ## Native library 탐색 순서
 

@@ -37,6 +37,21 @@ rt.onKeyDown(Key.Q, () => {
 
 runtime state lookup은 numeric입니다. constant store, `state++`/`--`, `state += constant`, `state ^= constant`, `booleanState = !booleanState` 같은 discarded update는 stack traffic 없이 direct slot/immediate opcode 하나로 fuse됩니다. 일반 식도 bounded native bytecode로 실행되며 어느 경로도 JavaScript나 FFI를 호출하지 않습니다.
 
+## Typed effect
+
+module-scope `const channel = effect("name", { ...schema })` 선언은 transient channel을 만듭니다. realtime handler의 `channel.emit({ ...payload })`는 schema field와 정확히 일치하는 object literal 하나를 받습니다. schema는 `"number"` 또는 `"boolean"` field를 최대 8개 지원합니다.
+
+object 문법은 source 가독성과 type check를 위한 것입니다. lowering은 schema 순서로 field를 push하고 숫자 channel ID와 arity를 가진 `EmitEffect` instruction 하나를 만듭니다. native 실행은 inline fixed `i64` array를 사용하며 property name과 JavaScript object는 bytecode나 VM에 들어가지 않습니다.
+
+```ts
+const changed = effect("changed", { count: "number", active: "boolean" });
+
+rt.hotkey("F6", () => {
+  count += 1;
+  changed.emit({ count, active });
+});
+```
+
 ## Trigger-level 상태 gate
 
 같은 boolean state가 handler 실행과 원본 입력 차단을 함께 제어해야 한다면 `when`을 사용합니다.

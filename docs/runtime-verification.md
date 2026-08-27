@@ -42,13 +42,13 @@ On macOS arm64, the following passed:
 
 - complete Rust workspace tests/Clippy/release build;
 - TypeScript build and tests;
-- ABI v4 load, bulk state snapshot, and permission read through Bun FFI;
+- ABI v5 load, bulk state snapshot, runtime event lane, and permission read through Bun FFI;
 - global tagged F20 injection observed through `CGEventTap` and handled by the synthetic VM trigger;
 - CoreGraphics suppression probe: baseline/inactive-gate transitions `2/2`, active native handler hit `1`, forwarded transitions `0`;
 - native observer publication into `DynamicInputLane` with zero drops in the smoke scenario;
 - default transparent/topmost/non-focusable/click-through overlay plus hidden opaque/focusable/decorated/resizable non-default policy creation at Retina resolution;
 - live overlay mutation rendering with the resolved window policy returned to Bun;
-- direct state-immediate VM workload over 200,000 local samples: 42 ns p50, 84 ns p95, and 84 ns p99 for trigger lookup + VM + null injection;
+- direct state-immediate VM workload over 1,000,000 local samples: 42 ns p50, 84 ns p95, and 84 ns p99 for trigger lookup + VM + null injection; the same percentiles held with one inline effect opcode and null effect sink;
 - native OS-submission benchmark execution.
 
 On Windows 10 x64 in an interactive desktop session, the following passed:

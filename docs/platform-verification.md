@@ -68,7 +68,7 @@ Expected shape:
 {
   "abiVersion": 4,
   "nativeLibraryPath": "/.../target/release/libspellwire_native.dylib",
-  "capabilities": { "mask": "0x77", "enabled": ["..."] },
+  "capabilities": { "mask": "0xf7", "enabled": ["..."] },
   "permissions": { "mask": "0x3", "observe": true, "inject": true }
 }
 ```
@@ -138,7 +138,7 @@ bun run build:native
 bun run inspect:runtime
 ```
 
-Expected library suffix is `target\release\spellwire_native.dll`, ABI is `4`, and capabilities are `0x77`. Windows currently reports both permission bits as granted because low-level hooks and `SendInput` have no preflight prompt.
+Expected library suffix is `target\release\spellwire_native.dll`, ABI is `5`, and capabilities are `0xf7`. Windows currently reports both permission bits as granted because low-level hooks and `SendInput` have no preflight prompt.
 
 That status does not bypass User Interface Privilege Isolation. A normal Spellwire process cannot inject into an administrator-elevated target. Verify first against a normal desktop application. If elevated-target testing is required, run Spellwire at the same integrity level and record that fact; never treat elevation as a general installation requirement.
 
@@ -174,7 +174,7 @@ bun run inspect:runtime
 
 `observe: true` means at least one readable evdev device was discovered. `inject: true` means `/dev/uinput` opened successfully. `inspect:runtime -- --request-permissions` does not install rules or display a prompt on Linux; it only rechecks the same resources.
 
-ABI should be `4` and capabilities should be `0x37`. Linux original-input suppression is not implemented; do not expect `consume` to hide the source event in this target-machine run.
+ABI should be `5` and capabilities should be `0xb7`. Linux original-input suppression is not implemented; do not expect `consume` to hide the source event in this target-machine run.
 
 ### 2. Review and optionally install the supplied udev rule
 
@@ -230,12 +230,12 @@ Repeat on each supported desktop/compositor. X11 and Wayland environments differ
 
 `scripts/platform-loopback.ts` performs these checks in order:
 
-1. load `examples/platform-loopback.spellwire.ts` through ABI v4;
+1. load `examples/platform-loopback.spellwire.ts` through ABI v5;
 2. require both observe and inject permissions;
-3. attach a 64-record `DynamicInputLane`;
+3. attach a 64-record `DynamicInputLane` and subscribe to changed state plus the typed `loopback` effect;
 4. explicitly dispatch physical-source F19 into the VM;
 5. have the VM inject tagged F20 through the real OS backend;
-6. observe the returning synthetic F20 and update named state to `1`;
+6. observe the returning synthetic F20, update named state to `1`, and verify both runtime-lane notifications;
 7. create a delayed held F20 sequence from F18;
 8. reload the program before the delayed release deadline;
 9. verify reload emitted exactly one release for the held synthetic F20;

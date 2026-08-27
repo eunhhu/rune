@@ -17,7 +17,7 @@ Linux:   target/release/libspellwire_native.so
 ## Version and capabilities
 
 ```c
-uint32_t spellwire_abi_version(void);       // 4
+uint32_t spellwire_abi_version(void);       // 5
 uint32_t spellwire_capabilities(void);
 uint32_t spellwire_permission_status(void);
 uint32_t spellwire_request_permissions(void);
@@ -33,11 +33,12 @@ Capability bits are:
 1 << 4  HostLifecycle
 1 << 5  NonBlockingDelay
 1 << 6  NativeInputSuppression
+1 << 7  NativeEventLane
 ```
 
-Windows and macOS return `0x77`: every bit above except `NativeOverlay`. Linux returns `0x37` because its evdev backend does not yet provide an exclusive pass-through relay for original-input suppression. Permission bits are `1 << 0` observe and `1 << 1` inject.
+Windows and macOS return `0xf7`: every bit above except `NativeOverlay`. Linux returns `0xb7` because its evdev backend does not yet provide an exclusive pass-through relay for original-input suppression. Permission bits are `1 << 0` observe and `1 << 1` inject.
 
-ABI version `4` and bytecode wire version `4` are independent. Wire v4 adds signed 64-bit/scaled delay encoding plus direct state-immediate opcodes. The decoder remains backward-compatible with wire v3, whose handler records already include modifier/repeat/consume policy and an optional native state gate.
+ABI version `5` and bytecode wire version `5` are independent. Wire v5 adds fixed-payload effects; wire v4 added signed 64-bit/scaled delays and direct state-immediate opcodes. The decoder remains backward-compatible with wire v3 and v4.
 
 ## Owned platform host
 
@@ -98,6 +99,27 @@ record: device, code, edge, source, timestamp_ns_low, timestamp_ns_high
 ```
 
 Capacity must be a power of two. Native code stores a record then release-stores `write`; the Bun SPSC consumer acquire-loads it. A full ring increments `dropped` and never overwrites unread events. Passing null detaches synchronously. Attached storage must remain live until detach or host stop; `NativeHost.attachDynamicLane()` retains the `SharedArrayBuffer` view for this lifetime.
+
+## Shared state/effect ring
+
+```c
+int32_t spellwire_host_set_event_ring(
+  SpellwireHost *host,
+  int32_t *words,
+  size_t word_len,
+  size_t capacity
+);
+```
+
+This native-to-control-plane ring uses the same four-word header and fixed 20-word records:
+
+```text
+kind 1 state:  kind, slot, 1, 0, value_low, value_high, ...
+kind 2 effect: kind, effect_id, length, 0, value0_low, value0_high, ... value7_high
+kind 3 reload: kind, 0, 0, 0, ...
+```
+
+State records are emitted only when the stored `i64` changes. Effect payload length is at most eight. A full ring increments `dropped` and never blocks the VM; durable state can recover through `spellwire_host_state_snapshot`, while transient effects may be lost. Passing null detaches synchronously.
 
 ## Compatibility engine API
 

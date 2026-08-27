@@ -42,13 +42,13 @@ macOS arm64에서 다음 항목을 통과했습니다.
 
 - 전체 Rust workspace test/Clippy/release build
 - TypeScript build와 test
-- Bun FFI를 통한 ABI v4 load, bulk state snapshot, permission read
+- Bun FFI를 통한 ABI v5 load, bulk state snapshot, runtime event lane, permission read
 - tagged F20 `CGEventPost` injection → `CGEventTap` observation → synthetic VM trigger
 - CoreGraphics suppression probe: baseline/inactive-gate transition `2/2`, active native handler hit `1`, forwarded transition `0`
 - `DynamicInputLane` publication과 smoke scenario drop 0
 - Retina resolution의 기본 transparent/topmost/non-focusable/click-through overlay와 hidden opaque/focusable/decorated/resizable non-default 정책 생성
 - Bun에 resolved window 정책을 반환하는 live overlay mutation rendering
-- direct state-immediate VM workload 200,000회 local sample: trigger lookup + VM + null injection 기준 p50 42ns, p95 84ns, p99 84ns
+- direct state-immediate VM workload 1,000,000회 local sample: trigger lookup + VM + null injection 기준 p50 42ns, p95 84ns, p99 84ns. inline effect opcode 하나와 null effect sink를 포함해도 같은 percentile 유지
 - native OS-submission benchmark
 
 Windows 10 x64의 대화형 desktop session에서 다음 항목을 통과했습니다.

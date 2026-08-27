@@ -68,7 +68,7 @@ await app.untilSignal();
 ## Native state가 화면에 반영되는 과정
 
 1. realtime handler가 persistent native state slot을 변경합니다. input dispatch에서 JavaScript를 호출하지 않습니다.
-2. overlay controller가 설정된 control-plane 주기(기본 30 Hz)에 `spellwire_host_state_snapshot` FFI command 한 번으로 모든 named state를 읽습니다.
+2. native worker가 실제로 바뀐 state만 SPSC event lane에 기록하고, `Spellwire.start`가 그 변경 뒤 cached named state를 읽습니다.
 3. shallow state snapshot이 같으면 layout과 renderer IPC를 모두 생략합니다.
 4. 변경되면 `overlay(state)`가 가벼운 element tree를 반환합니다.
 5. stable key/path가 retained primitive와 tree를 reconcile합니다. 같은 primitive는 mutation을 만들지 않습니다.
@@ -77,7 +77,7 @@ await app.untilSignal();
 
 이 경로는 realtime input callback과 분리됩니다. 정적 overlay는 JavaScript timer, per-frame callback, 반복 IPC가 모두 0입니다.
 
-알고 있는 control-plane 경계에서만 직접 갱신하려면 polling을 끌 수 있습니다.
+`Spellwire.start({ overlay })`는 기본적으로 changed-state event를 구독하며 overlay polling timer를 만들지 않습니다. 알고 있는 control-plane 경계에서만 직접 갱신하려면 0을 명시할 수 있습니다.
 
 ```ts
 const app = await Spellwire.start({
@@ -208,7 +208,7 @@ const overlay = await Overlay.mount(
 
 같은 source의 여러 binding은 reconciliation pass당 한 번만 읽습니다. 여러 state를 표시할 때는 host 전체를 한 번 bind하는 편이 좋습니다. state마다 FFI를 호출하지 않고 native bulk snapshot 한 번을 사용합니다.
 
-`OverlayMountOptions.fps`는 0–240이며 0은 manual refresh입니다. `executablePath`, `readyTimeoutMs`, `window`는 native startup을 제어하고 `onError`는 asynchronous refresh failure를 처리합니다.
+`OverlayMountOptions.fps`는 0–240이며 0은 manual refresh입니다. 직접 `Overlay.mount`하면 기본값은 30이고, `Spellwire.start`는 `fps`를 명시하지 않으면 changed-state event를 사용합니다. `executablePath`, `readyTimeoutMs`, `window`는 native startup을 제어하고 `onError`는 asynchronous refresh failure를 처리합니다.
 
 ## Low-level retained escape hatch
 
@@ -220,8 +220,8 @@ const overlay = await Overlay.mount(
 
 - realtime input dispatch에서 JavaScript 호출 0
 - state와 scene이 같을 때 layout, IPC, renderer 작업 0
-- named-state 수와 무관하게 poll당 bulk state snapshot 1회, 값이 같으면 frozen JS snapshot 재사용
-- refresh가 interval보다 오래 걸려도 polling tick을 합쳐 backlog 생성 방지
+- `Spellwire.start` 기본 경로에는 overlay polling timer가 없고 changed state가 cached snapshot reconcile 1회를 trigger
+- 명시적 polling에서 refresh가 interval보다 오래 걸려도 tick을 합쳐 backlog 생성 방지
 - unique source당 binding read 1회
 - JSON hashing 없는 keyed primitive equality check
 - update당 coalesced IPC batch와 native redraw 각 1회
