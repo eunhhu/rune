@@ -24,7 +24,24 @@ bun run build  # dist/main.spellwire.bin과 manifest 생성
 
 `start`와 `watch`는 네이티브 호스트를 시작하기 전에 플랫폼 권한을 자동으로 확인하고 요청합니다.
 
-생성 프로젝트의 `src/app.ts`에는 상태 기반 modern overlay도 포함됩니다. `Spellwire.start()`와 Figma식 `ui.row`/`ui.column` auto layout을 사용하므로 수동 update loop 없이 realtime 로직과 UI를 분리해 편집할 수 있습니다. [상태 기반 네이티브 오버레이](docs/overlay.ko.md)를 참고하십시오.
+생성 프로젝트의 `src/app.ts`에는 상태 기반 modern overlay도 포함됩니다. `Spellwire.start()`와 Figma식 `ui.row`/`ui.column` auto layout을 사용하므로 수동 update loop 없이 realtime 로직과 UI를 분리해 편집할 수 있습니다.
+
+## API 한눈에 보기
+
+| 할 일 | API |
+| --- | --- |
+| 입력을 차단하는 hotkey | `rt.hotkey("Ctrl+Shift+K", handler)` |
+| key remap | `rt.remap("CapsLock", "Escape")` |
+| 영속 상태 | module-scope `let enabled = true` |
+| 키보드/마우스 출력 | `tapKey`, `keyDown`, `clickMouse`, `moveMouse`, `wheelMouse` |
+| 지연 | `sleepUs(microseconds)` |
+| 입력 + watch + UI 시작 | `Spellwire.start(options)` |
+| Overlay layout | `ui.row`, `ui.column`, `ui.panel`, `ui.stack` |
+| Overlay content | `ui.text`, `ui.ellipse`, `ui.dot`, `ui.badge`, `ui.divider` |
+| 상태 기반 UI | `overlay: state => ...`, `ui.bind`, `ui.when` |
+| UI style | `width`, `height`, `padding`, `gap`, `fill`, `stroke`, `shadow`, `opacity`, font prop |
+
+signature, 기본값, option 표, 완전한 state-to-overlay 앱, 현재 window 정책 한계는 **[한 페이지 API 레퍼런스](docs/api.ko.md)**에서 모두 찾을 수 있습니다. 일반 API를 찾기 위해 자동화와 overlay 문서를 오갈 필요가 없습니다.
 
 첫 npm 배포 이후 기존 프로젝트에 직접 설치하려면 다음 명령을 사용합니다.
 
@@ -126,21 +143,22 @@ CLI가 시작 전에 권한을 확인하고 요청합니다. `Ctrl+C`를 누르�
 
 ## 문서
 
+여기서 시작:
+
+- **[한 페이지 API 레퍼런스](docs/api.ko.md)** — 생성/실행/빌드, hotkey, 상태, 출력, 수명 주기, 전체 overlay API, 기본값, 한계를 검색 가능한 한 페이지로 제공
+- [빠른 시작](docs/quick-start.ko.md) — 첫 프로젝트와 첫 live run
+- [문제 해결](docs/troubleshooting.ko.md) — 오류와 플랫폼 설정
+- [플랫폼 검증](docs/platform-verification.ko.md) — macOS, Windows, Linux 복사 가능 검증 절차
+
+선택형 상세 문서:
+
 - [한국어 문서 목차](docs/index.ko.md)
-- [빠른 시작](docs/quick-start.ko.md)
-- [라이브 네이티브 호스트](docs/live-host.ko.md)
-- [플랫폼 검증](docs/platform-verification.ko.md)
-- [API 레퍼런스](docs/api.ko.md)
-- [Hotkey, remap, 상태 gate, AutoHotkey 마이그레이션](docs/automation.ko.md)
-- [실시간 TypeScript](docs/typescript-runtime.ko.md)
-- [아키텍처](docs/architecture.ko.md)
-- [네이티브 C ABI](docs/native-abi.ko.md)
-- [플랫폼 상태](docs/platforms.ko.md)
-- [문제 해결](docs/troubleshooting.ko.md)
-- [배포](docs/publishing.ko.md)
-- [구현 상태](docs/status.ko.md)
-- [검증 절차](docs/runtime-verification.ko.md)
-- [오버레이](docs/overlay.ko.md)
+- [자동화 의미론과 AutoHotkey 마이그레이션](docs/automation.ko.md)
+- [Overlay renderer와 성능 설계](docs/overlay.ko.md)
+- [Realtime compiler subset](docs/typescript-runtime.ko.md)
+- [Live native host 내부 구조](docs/live-host.ko.md)
+- [아키텍처](docs/architecture.ko.md), [네이티브 C ABI](docs/native-abi.ko.md), [플랫폼 상태](docs/platforms.ko.md)
+- [배포](docs/publishing.ko.md), [구현 상태](docs/status.ko.md), [검증 절차](docs/runtime-verification.ko.md)
 
 ## 개발 검증
 

@@ -2,26 +2,31 @@
 
 [한국어](index.ko.md)
 
-Use these pages in order when evaluating the current alpha:
+Normal use starts with one page. The remaining pages are task guides or implementation deep dives, not required chapters.
 
-1. **[Quick Start](quick-start.md)** — install or clone, compile, inspect, and simulate a stateful macro.
-2. **[Hotkeys and automation](automation.md)** — consuming chords, remaps, native state gates, overlay integration, and AutoHotkey migration status.
-3. **[Live Native Host Guide](live-host.md)** — permissions, CLI use, programmatic lifecycle, hot reload, named state, dynamic input, and safe shutdown.
-4. **[Platform Verification Guide](platform-verification.md)** — copyable macOS, Windows, and Linux checks with expected output and failure interpretation.
-5. **[API Reference](api.md)** — exact exports available from `spellwire` and `spellwire/compiler`.
-6. **[TypeScript Runtime](typescript-runtime.md)** — persistent state, control flow, helper functions, limits, and unsupported syntax.
-7. **[Architecture](architecture.md)** — public package, compiler, wire format, VM, simulator, and host boundary.
-8. **[Native C ABI](native-abi.md)** — owned platform host, shared input ring, and compatibility engine.
-9. **[Platform Status](platforms.md)** — backend APIs, permissions, validation, and target limitations.
-10. **[Overlay](overlay.md)** — state binding, Figma-style layout/styling API, retained dirty renderer.
-11. **[Troubleshooting](troubleshooting.md)** — setup, compiler, simulator, and host-boundary issues.
-12. **[Publishing](publishing.md)** — npm package release and verification.
-13. **[Implementation Status](status.md)** — implemented features and external gates.
-14. **[Verification](runtime-verification.md)** — checks that gate the source tree and pull request.
+## Use Spellwire
 
-## Choose the right path
+1. **[One-page API reference](api.md)** — copyable complete app; project commands; hotkeys; remaps; state; keyboard/mouse output; `Spellwire.start`; every overlay constructor, property, option, lifecycle method, and current limitation.
+2. **[Quick Start](quick-start.md)** — create a project, simulate safely, then perform the first live run.
+3. **[Troubleshooting](troubleshooting.md)** — find setup, compiler, native host, and overlay errors by message.
+4. **[Platform Verification](platform-verification.md)** — run the macOS, Windows, or Linux acceptance checklist and report exact results.
 
-- To learn the macro language without global hooks, complete **Quick Start** through the simulator.
-- To run real keyboard/mouse automation, continue with **Live Native Host Guide**.
-- To certify one OS or hand target-machine results back to a maintainer, use **Platform Verification Guide**.
-- To investigate an error, start with **Troubleshooting**, then follow its link to the relevant detailed guide.
+The API reference is the normal lookup surface. It intentionally combines automation and overlay APIs so a state-to-screen workflow needs no page change.
+
+## Optional behavior and design detail
+
+| Document | Use it when… |
+| --- | --- |
+| [Automation semantics](automation.md) | You need suppression rules, state-gate behavior, or the AutoHotkey migration matrix |
+| [Realtime TypeScript](typescript-runtime.md) | You need compiler syntax limits, loops, helpers, or resource budgets |
+| [Overlay design](overlay.md) | You are profiling reconciliation/rendering or studying renderer isolation |
+| [Live native host](live-host.md) | You need low-level host lifetime, dynamic lane, reload, or library resolution details |
+| [Platform status](platforms.md) | You need backend capability and compositor caveats |
+| [Architecture](architecture.md) | You need compiler, wire, VM, worker, and renderer boundaries |
+| [Native C ABI](native-abi.md) | You are embedding Spellwire outside Bun |
+
+## Maintainer and release material
+
+- [Implementation status](status.md)
+- [Runtime verification](runtime-verification.md)
+- [Publishing](publishing.md)

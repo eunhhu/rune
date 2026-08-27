@@ -1,8 +1,125 @@
-# API 레퍼런스
+# Spellwire API — 한 페이지 레퍼런스
 
 [English](api.md)
 
-이 문서는 현재 source tree에 실제로 존재하는 API만 설명합니다. 예전 설계 초안의 `macro(...)`, `spellwire.start()`, `rt.load(...)`, `on.keyDown(...)`, `key.tap(...)`은 현재 SDK에서 export하지 않습니다.
+일반 Spellwire 앱에 필요한 명령, 실시간 자동화, 영속 상태, 앱 수명 주기, overlay UI를 이 페이지 하나에서 찾을 수 있습니다. 다른 문서는 내부 구조, 플랫폼 검증, 설계 이유를 설명하는 선택 자료입니다. 일상 API를 찾기 위해 페이지를 오갈 필요가 없습니다.
+
+현재 source tree에 실제로 존재하는 API만 적습니다. 예전 설계 초안의 `macro(...)`, `spellwire.start()`, `rt.load(...)`, `on.keyDown(...)`, `key.tap(...)`은 export하지 않습니다.
+
+## 이 페이지에서 바로 찾기
+
+| 하고 싶은 일 | 사용할 API | 위치 |
+| --- | --- | --- |
+| 프로젝트 생성 | `bun create spellwire my-automation` | [생성, 실행, 감시, 빌드](#생성-실행-감시-빌드) |
+| 입력을 차단하는 chord 등록 | `rt.hotkey("Ctrl+K", handler)` | [실시간 handler 등록](#실시간-handler-등록) |
+| 키 하나 remap | `rt.remap("CapsLock", "Escape")` | [실시간 handler 등록](#실시간-handler-등록) |
+| native 상태 유지 | module-scope `let enabled = true` | [영속 realtime 상태](#영속-realtime-상태) |
+| 키보드/마우스 출력 | `tapKey`, `clickMouse`, `moveMouse` | [출력 및 held intrinsic](#출력-및-held-intrinsic) |
+| handler 지연 | `sleepUs(250_000)` | [출력 및 held intrinsic](#출력-및-held-intrinsic) |
+| 입력, watch, UI 함께 시작 | `Spellwire.start(options)` | [통합 앱 수명 주기](#통합-application-lifecycle) |
+| 상태를 overlay에 표시 | `overlay: state => ui.text(...)` | [Modern overlay](#modern-overlay) |
+| row, column, panel, stack 구성 | `ui.row`, `ui.column`, `ui.panel` | [UI 생성 함수](#ui-생성-함수) |
+| 크기, padding, gap, fill, border, shadow, font 설정 | element prop | [Layout과 visual 속성](#layout과-visual-속성) |
+| UI 일부만 state binding | `ui.bind(state, render)` | [Binding과 refresh](#binding과-refresh) |
+| UI 표시, 숨김, 수동 갱신 | `overlay.show()`, `hide()`, `app.refreshOverlay()` | [Overlay 수명 주기](#overlay-수명-주기) |
+| topmost/transparency/focus 설정 | 현재 고정 native 정책 | [Window 동작](#window-동작) |
+| native host 직접 제어 | `NativeHost` | [Native host와 권한](#native-host와-권한) |
+
+## 바로 실행 가능한 전체 앱
+
+생성 프로젝트가 이미 이 두 파일 구조를 제공합니다. realtime 코드는 native bytecode로 compile되고, `app.ts`가 권한, hot reload, 상태 snapshot, native overlay 수명 주기를 소유합니다.
+
+`src/main.spellwire.ts`:
+
+```ts
+import { Key, rt, tapKey } from "spellwire";
+
+let enabled = true;
+let presses = 0;
+
+rt.hotkey("Q", () => {
+  presses += 1;
+  tapKey(Key.E);
+}, { when: () => enabled });
+
+rt.hotkey("F8", () => {
+  enabled = !enabled;
+}, { consume: false });
+
+rt.remap("CapsLock", "Escape", { when: () => enabled });
+```
+
+`src/app.ts`:
+
+```ts
+import { fileURLToPath } from "node:url";
+import { Spellwire, ui } from "spellwire";
+
+const app = await Spellwire.start({
+  input: fileURLToPath(new URL("./main.spellwire.ts", import.meta.url)),
+  watch: Bun.argv.includes("--watch"),
+  overlay: (state) => {
+    const enabled = state.enabled === true;
+    return ui.column(
+      {
+        x: 24,
+        y: 48,
+        width: 280,
+        padding: 16,
+        gap: 12,
+        fill: "#111827ee",
+        radius: 16,
+        stroke: "#ffffff24",
+        shadow: { fill: "#00000066", y: 8, blur: 24 },
+      },
+      ui.row(
+        { width: "fill", gap: 8, align: "center" },
+        ui.dot({ size: 8, fill: enabled ? "#34d399ff" : "#fb7185ff" }),
+        ui.text(enabled ? "Active" : "Paused", {
+          width: "fill",
+          fill: "#ffffffff",
+          fontSize: 16,
+          fontWeight: 600,
+        }),
+        ui.badge("F8"),
+      ),
+      ui.text(`Q presses: ${String(state.presses ?? 0)}`, {
+        fill: "#cbd5e1ff",
+        fontFamily: "monospace",
+        fontSize: 13,
+      }),
+    );
+  },
+});
+
+await app.untilSignal();
+```
+
+## 생성, 실행, 감시, 빌드
+
+```bash
+bun create spellwire my-automation
+cd my-automation
+bun run start
+bun run watch
+bun run build
+```
+
+| 명령 | 동작 |
+| --- | --- |
+| `bun run start` | source를 메모리에서 compile하고 권한을 준비한 뒤 바로 실행 |
+| `bun run watch` | 실행하면서 source 변경 후 native program reload |
+| `bun run build` | `dist/main.spellwire.bin`과 named-state manifest 생성 |
+
+직접 CLI를 사용할 때의 같은 명령:
+
+```bash
+bunx spellwire run [macro.spellwire.ts]
+bunx spellwire watch [macro.spellwire.ts]
+bunx spellwire compile macro.spellwire.ts [output.spellwire.bin]
+```
+
+입력을 생략하면 `src/main.spellwire.ts`를 사용합니다. `run`과 `watch`는 메모리에서 compile하고 권한을 한 번 준비합니다. `watch`는 control-plane file reload만 추가합니다.
 
 ## Package import
 
@@ -35,19 +152,33 @@ import {
 } from "spellwire";
 ```
 
-compiler API와 CLI workflow:
+일반 앱에는 `Spellwire`, `ui`, `rt`, key/button, 출력 intrinsic이면 충분합니다. `NativeHost`, low-level overlay class, compiler helper, fallback helper는 고급 escape hatch입니다.
+
+compiler API:
 
 ```ts
 import { compileSource, encodeModule } from "spellwire/compiler";
 ```
 
-```bash
-bunx spellwire run [macro.spellwire.ts]
-bunx spellwire watch [macro.spellwire.ts]
-bunx spellwire compile macro.spellwire.ts [output.spellwire.bin]
+## 영속 realtime 상태
+
+safe integer 또는 boolean으로 초기화한 module-scope `let`을 realtime handler가 참조하면 영속 native `i64` state slot이 됩니다.
+
+```ts
+let enabled = true;
+let count = 0;
+
+rt.hotkey("F8", () => {
+  enabled = !enabled;
+  count += 1;
+});
 ```
 
-입력을 생략하면 `src/main.spellwire.ts`를 사용합니다. `run`/`watch`는 source를 메모리에서 compile하고 권한을 한 번 준비한 뒤 같은 owned native host를 시작합니다. `watch`가 추가하는 것은 control-plane filesystem reload뿐입니다.
+대입, compound 대입, `++`/`--`, 정수 산술, 비교, boolean logic, bit 연산, 조건, 제한 반복은 native VM opcode로 compile됩니다. realtime dispatch에는 state 이름 lookup, JavaScript object, FFI가 없습니다. module-scope `const`는 정적으로 표현할 수 있으면 fold됩니다.
+
+상태는 dispatch 사이에 유지됩니다. source reload는 `preserveState: false`가 아니면 같은 이름과 kind의 값을 보존합니다. `when`은 native suppression table도 dispatch 전에 같은 gate를 평가해야 하므로 module-scope boolean 하나 또는 그 부정만 받습니다.
+
+realtime handler 밖에서는 `app.host.state("name")`, `app.host.states.name`, 또는 bulk `app.host.snapshotStates()`를 사용합니다. 이 경로는 control-plane FFI이며 realtime opcode가 아닙니다.
 
 ## 실시간 handler 등록
 
@@ -72,6 +203,19 @@ rt.hotkey("Ctrl+Shift+K", () => {
 
 `edge`는 `"down"` 또는 `"up"`입니다. `when`은 module-scope boolean native state 하나 또는 그 부정을 반환해야 합니다. gate가 VM dispatch와 원본 입력 차단을 함께 제어합니다. `parseHotkey(chord)`는 validation/tooling에서 같은 parser를 사용할 수 있게 `{ device, code, modifiers }`를 반환합니다. logical modifier bit는 `Modifier`로 export합니다.
 
+Chord 문법은 `+`로 구분한 trigger 하나와 logical modifier 0개 이상입니다.
+
+- modifier: `Ctrl`/`Control`, `Shift`, `Alt`/`Option`, `Meta`/`Cmd`/`Command`/`Win`/`Super`
+- trigger: export된 모든 `Key` member 이름, `A`–`Z`, `0`–`9`, `Esc`, `Return`, `PgUp`, `PgDn`, `Spacebar` 같은 alias, 또는 `LButton`, `RButton`, `MButton`, `XButton1`, `XButton2`
+- 이름은 대소문자, 공백, `_`, `-`를 무시
+- modifier가 아닌 trigger는 정확히 하나여야 하며 `A+B` 같은 조합은 거부
+
+```ts
+rt.hotkey("Cmd+Space", handler);
+rt.hotkey("Ctrl+Alt+K", handler);
+rt.hotkey("Shift+LButton", handler);
+```
+
 ### `rt.remap(from, to, options?)`
 
 key down/up handler를 한 쌍으로 compile하고 활성 source sequence를 consume합니다.
@@ -85,7 +229,7 @@ rt.remap(Key.CapsLock, Key.Escape, { repeat: false });
 
 ### Low-level 등록
 
-```ts
+```text
 rt.onKeyDown(key, handler, options?)
 rt.onKeyUp(key, handler, options?)
 rt.onMouseDown(button, handler, options?)
@@ -115,7 +259,7 @@ Low-level option:
 
 compiler는 trigger와 option을 정적으로 해석합니다. identifier, quoted name, computed string name, shorthand constant를 지원합니다. spread, 중복 property, dynamic value, 알 수 없는 option은 compile error입니다.
 
-문법, suppression 동작, overlay state 흐름, AutoHotkey 마이그레이션 표는 [Hotkey, remap, 상태 기반 자동화](automation.ko.md)를 참고하십시오.
+특수 release/suppression case와 AutoHotkey migration matrix가 필요할 때만 선택형 [자동화 의미론](automation.ko.md)을 참고하십시오.
 
 ## 출력 및 held intrinsic
 
@@ -134,6 +278,18 @@ mouseHeld(MouseButton.Right)
 ```
 
 zero-delay 출력은 고정 native output batch로 모입니다. live host에서 `sleepUs()`는 batch를 flush하고 fixed-capacity absolute-deadline scheduler에 continuation을 양보합니다. compatibility engine과 simulator는 동기 대기합니다.
+
+| API | Native 동작 |
+| --- | --- |
+| `keyDown(key)` / `keyUp(key)` | keyboard transition 하나 출력 |
+| `tapKey(key)` | down/up transition 한 쌍 출력 |
+| `mouseDown(button)` / `mouseUp(button)` | mouse button transition 하나 출력 |
+| `clickMouse(button)` | mouse down/up 한 쌍 출력 |
+| `moveMouse(dx, dy)` | 상대 pointer 이동 출력 |
+| `wheelMouse(x, y)` | 수평/수직 wheel 이동 출력 |
+| `sleepUs(duration)` | output flush 후 monotonic deadline까지 yield |
+
+현재 microsecond helper만 있습니다. 직접 변환하십시오: `250 ms = sleepUs(250_000)`, `2 s = sleepUs(2_000_000)`, `1 min = sleepUs(60_000_000)`. 지연 하나는 unsigned 32-bit microsecond에 들어가야 하므로 최대 `4_294_967_295 µs`, 약 71분 35초입니다. 현재 `sleepMs`, `sleepSeconds`, `sleepMinutes`, `sleepHours` export는 없습니다.
 
 held 함수는 VM이 handler 실행 전에 갱신한 input-state bitmap을 읽으므로 platform query가 없습니다. 일반 Bun 코드에서 output intrinsic을 직접 호출하면 `withRealtimeActionSink()`가 없는 경우 오류가 발생합니다.
 
@@ -260,15 +416,218 @@ host는 package library, `SPELLWIRE_NATIVE_LIBRARY`, workspace release/debug bui
 
 ## 통합 application lifecycle
 
-`Spellwire.start(options)`는 host load, 자동 권한 준비, start, 선택적 watch, 상태 기반 overlay, 안전한 종료를 소유합니다. `options.overlay(state)`는 shallow named-state snapshot을 받습니다. `refreshOverlay()`는 수동 update boundary를 지원하고 `untilSignal()`은 host stop 전에 overlay를 종료합니다.
+일반 application은 이 API를 사용하십시오.
+
+```ts
+const app = await Spellwire.start({
+  input: "src/main.spellwire.ts",
+  watch: true,
+  overlay: (state) => ui.text(String(state.count ?? 0)),
+});
+
+await app.untilSignal();
+```
+
+`Spellwire.start(options)`가 host load, 권한 준비, native input start, 선택적 file watch, 상태 기반 overlay, 안전 종료를 모두 소유합니다.
+
+| `SpellwireStartOptions` | 기본값 | 계약 |
+| --- | --- | --- |
+| `input` | `"src/main.spellwire.ts"` | realtime TypeScript 또는 compiled `.bin` 경로 |
+| `watch` | `false` | input source를 감시하고 native program reload |
+| `debounceMs` | host 기본값 | file reload debounce |
+| `preserveState` | `true` | reload 때 compatible named state 보존 |
+| `requestPermissions` | `true` | 시작 전에 observe/inject 권한 확인·요청 |
+| `onReload` | — | watch reload 성공 후 호출 |
+| `onError` | console/기본 전파 | watch 또는 asynchronous overlay failure 수신 |
+| `overlay(state)` | — | shallow named-state snapshot으로 overlay 생성 |
+| `overlayOptions` | — | 아래 polling 및 renderer startup option |
+| `nativeLibraryPath` | 자동 탐색 | native library 직접 지정 |
+| `manifestPath` | 인접 manifest | compiled binary의 manifest 직접 지정 |
+
+| App member | 계약 |
+| --- | --- |
+| `app.host` | 시작된 `NativeHost`; `states`, `reload`, snapshot 포함 |
+| `app.overlay` | mount된 `Overlay`; callback이 없으면 `undefined` |
+| `app.refreshOverlay()` | binding read/reconciliation 한 번 강제; `fps: 0`에서 사용 |
+| `app.untilSignal()` | `SIGINT`/`SIGTERM`을 기다린 뒤 안전 종료 |
+| `app.close()` | watcher, renderer, host를 닫고 추적 중인 synthetic input 해제 |
 
 ## Modern overlay
 
-`Overlay.mount(tree, options?)`는 retained declarative tree를 mount합니다. `ui`는 `row`, `column`, `panel`, `stack`, `frame`, `box`, `text`, `ellipse`, `dot`, `divider`, `badge`, `spacer`, `bind`, `when`을 export합니다.
+`Spellwire.start({ overlay })`가 가장 짧은 state-to-screen 경로입니다. `Overlay.mount(tree, options?)`는 standalone API입니다. 둘 다 native retained renderer를 사용하며 DOM, WebView, React, per-frame JavaScript drawing callback이 없습니다.
 
-layout prop은 숫자/`"fill"` width·height, min/max dimension, padding, gap, alignment, justification, offset을 지원합니다. visual prop은 fill, stroke, radius, shadow, 상속 opacity, system/monospace family, font size/weight, line height, letter spacing, text alignment를 지원합니다.
+### UI 생성 함수
 
-`OverlayScene`과 `NativeOverlayRenderer`는 text/rect/ellipse/line primitive용 low-level retained API로 유지됩니다. pending change는 node별로 합쳐지고 `apply(scene)`는 batch 하나를 전송합니다. 상태 결합 예제와 속성 계약은 [상태 기반 네이티브 오버레이](overlay.ko.md)를 참고하십시오.
+| API | 결과 |
+| --- | --- |
+| `ui.row(props, ...children)` | 수평 auto layout |
+| `ui.column(props, ...children)` | 수직 auto layout |
+| `ui.panel(props, ...children)` | 수직 frame의 semantic alias |
+| `ui.stack(props, ...children)` | 같은 padded origin에 child layer |
+| `ui.box(...)` / `ui.frame(...)` | `ui.stack(...)` alias |
+| `ui.text(value, props?)` | text primitive |
+| `ui.ellipse(props?)` | ellipse primitive |
+| `ui.dot({ size, ...props })` | 같은 width/height ellipse 편의 함수 |
+| `ui.divider(props?)` | 기본 1 px, fill-width divider |
+| `ui.badge(label, props?)` | style된 frame+text 편의 함수 |
+| `ui.spacer(sizeOrProps?)` | 빈 layout 공간 |
+| `ui.bind(source, render, options?)` | cache되는 state-bound subtree |
+| `ui.when(source, content, fallback?)` | 조건부 state-bound subtree |
+
+child에는 중첩 배열, `false`, `null`, `undefined`를 넣을 수 있습니다. 조건부 삽입이나 sibling 재정렬에서 identity를 유지하려면 `key`를 사용하십시오.
+
+### Layout과 visual 속성
+
+frame, text, ellipse, spacer에 공통으로 적용되는 layout prop:
+
+| Prop | Type | 의미 |
+| --- | --- | --- |
+| `key` | `string` | 안정 reconciliation identity |
+| `x`, `y` | `number` | logical-pixel offset |
+| `width`, `height` | `number \| "fill"` | 고정 크기 또는 parent 남은 공간; 생략하면 content hug |
+| `minWidth`, `minHeight` | `number` | 최소 measured size |
+| `maxWidth`, `maxHeight` | `number` | 최대 measured size |
+| `opacity` | `number` | element opacity; parent 값은 descendant에 곱해짐 |
+
+frame 전용 prop:
+
+| Prop | Type / 값 |
+| --- | --- |
+| `padding` | `number` 또는 `{ x?, y?, top?, right?, bottom?, left? }`; side 값 우선 |
+| `gap` | flow child 사이 logical pixel |
+| `align` | `"start" \| "center" \| "end" \| "stretch"` |
+| `justify` | `"start" \| "center" \| "end" \| "space-between"` |
+| `fill` | `#RRGGBB` 또는 `#RRGGBBAA` |
+| `radius` | logical-pixel corner radius |
+| `stroke` | 1 px color string 또는 `{ fill, width }` |
+| `shadow` | `{ fill, x?, y?, blur?, spread? }` |
+
+text 전용 prop:
+
+| Prop | Type / 값 |
+| --- | --- |
+| `fill` | text color, `#RRGGBB` 또는 `#RRGGBBAA` |
+| `fontFamily` | `"system" \| "monospace"` |
+| `fontSize`, `fontWeight`, `lineHeight`, `letterSpacing` | `number` |
+| `textAlign` | `"left" \| "center" \| "right"` |
+
+ellipse는 `fill`, `stroke`, `shadow`를 지원합니다. `ui.dot`은 `size`를 추가합니다. `ui.badge`는 모든 frame prop과 함께 `textFill`, `fontFamily`, `fontSize`, `fontWeight`를 받습니다.
+
+modern style vocabulary 전체 예제:
+
+```ts
+ui.row(
+  {
+    key: "status",
+    x: 24,
+    y: 48,
+    width: 320,
+    minHeight: 56,
+    padding: { x: 16, y: 12 },
+    gap: 10,
+    align: "center",
+    justify: "space-between",
+    fill: "#111827ee",
+    radius: 16,
+    stroke: { fill: "#ffffff30", width: 1 },
+    shadow: { fill: "#00000066", y: 8, blur: 24 },
+    opacity: 0.96,
+  },
+  ui.text("Active", {
+    width: "fill",
+    fill: "#ffffffff",
+    fontFamily: "system",
+    fontSize: 16,
+    fontWeight: 600,
+    lineHeight: 20,
+    letterSpacing: 0.2,
+  }),
+  ui.badge("F8"),
+);
+```
+
+### Binding과 refresh
+
+`ui.bind`는 `NativeState`, `NativeHost`, getter 함수, `get()`/`snapshotStates()` 구현 object를 받습니다.
+
+```ts
+const overlay = await Overlay.mount(
+  ui.column(
+    { padding: 12, gap: 8, fill: "#111827ee" },
+    ui.bind(host.states.enabled, (enabled) =>
+      ui.text(enabled ? "Enabled" : "Paused"),
+    ),
+    ui.bind(host.states.count, (count) => ui.text(`Count: ${count}`)),
+  ),
+);
+```
+
+`ui.bind`는 기본 shallow equality를 사용하며 `options.equals(left, right)`로 교체할 수 있습니다. reconciliation pass마다 unique source를 한 번 읽습니다. 값이 같으면 layout과 renderer IPC가 모두 없습니다. binding이 바뀌면 해당 render callback만 다시 실행하고, resolved tree를 layout한 뒤 keyed primitive를 diff합니다. 바뀐 primitive만 process boundary를 넘고 native renderer는 영향 영역만 다시 그립니다.
+
+`Spellwire.start({ overlay })`는 bulk host snapshot 하나를 root callback에 bind합니다. named state 하나라도 바뀌면 root callback을 다시 실행합니다. React식 render/reconcile에 가깝고 자동 signal dependency tracking은 아닙니다. callback 단위 granularity가 필요하면 state별 `ui.bind`를 사용하십시오.
+
+### Overlay 수명 주기
+
+```ts
+const overlay = await Overlay.mount(tree, {
+  fps: 30,
+  executablePath: "/optional/spellwire-overlay",
+  readyTimeoutMs: 5_000,
+  onError: console.error,
+});
+
+await overlay.set(nextTree);
+await overlay.refresh();
+await overlay.hide();
+await overlay.show();
+await overlay.close();
+```
+
+| `OverlayMountOptions` | 기본값 | 계약 |
+| --- | --- | --- |
+| `fps` | `30` | 초당 binding poll, `0`은 manual refresh; 0–240 |
+| `executablePath` | 자동 탐색 | native renderer 직접 지정 |
+| `readyTimeoutMs` | `5_000` | renderer startup timeout |
+| `onError` | console | asynchronous refresh error callback |
+| `renderer` | 새로 생성 | 기존 `NativeOverlayRenderer` 재사용; `SpellwireStartOptions.overlayOptions`에서는 사용 불가 |
+
+정적 tree는 timer를 만들지 않습니다. refresh 진행 중 poll tick은 합쳐지므로 느린 update가 backlog를 만들지 않습니다.
+
+### Window 동작
+
+현재 window 정책은 고정이며 `OverlayMountOptions`에서 설정할 수 없습니다.
+
+| 동작 | 현재 값 |
+| --- | --- |
+| Transparent framebuffer | 활성 |
+| Always on top | 활성 |
+| Decoration / resize | 비활성 |
+| Pointer hit test | 비활성, click-through |
+| 초기 monitor와 size | primary monitor 전체 영역 |
+| Show/hide | runtime method 지원 |
+| Focusable / non-activating 보장 | public option 없음; 플랫폼 전체에서 보장하지 않음 |
+
+transparency, topmost, focusability, click-through, monitor 선택, position, size, taskbar 표시, decoration은 현재 public window option이 아닙니다. pointer click-through만으로 OS가 window에 focus를 절대 주지 않는다고 보장할 수 없습니다. Linux topmost/transparency는 compositor에 의존합니다.
+
+### Low-level retained overlay
+
+`OverlayScene`과 `NativeOverlayRenderer`는 최종 좌표를 이미 계산하는 caller용 escape hatch입니다. primitive kind는 `text`, `rect`, `ellipse`, `line`입니다.
+
+```ts
+const renderer = await NativeOverlayRenderer.start();
+const scene = new OverlayScene();
+const id = scene.create({ kind: "text", x: 20, y: 20, text: "Ready", size: 16 });
+await renderer.apply(scene);
+
+scene.update(id, { kind: "text", x: 20, y: 20, text: "Running", size: 16 });
+await renderer.apply(scene);
+
+scene.remove(id);
+await renderer.apply(scene);
+await renderer.close();
+```
+
+pending change는 node별로 합쳐집니다. 같은 내용의 update는 no-op이며 `apply(scene)`는 mutation batch를 최대 하나 전송합니다.
 
 ## ABI
 

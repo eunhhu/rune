@@ -34,7 +34,24 @@ bun run build  # write dist/main.spellwire.bin and its manifest
 
 `start` and `watch` prepare platform permissions automatically before the native host starts.
 
-Generated projects also include a state-driven modern overlay in `src/app.ts`. It uses `Spellwire.start()` plus Figma-style `ui.row`/`ui.column` auto layout; edit realtime logic and UI independently without a manual update loop. See [State-driven native overlay](docs/overlay.md).
+Generated projects also include a state-driven modern overlay in `src/app.ts`. It uses `Spellwire.start()` plus Figma-style `ui.row`/`ui.column` auto layout; edit realtime logic and UI independently without a manual update loop.
+
+## API at a glance
+
+| Task | API |
+| --- | --- |
+| Consuming hotkey | `rt.hotkey("Ctrl+Shift+K", handler)` |
+| Key remap | `rt.remap("CapsLock", "Escape")` |
+| Persistent state | module-scope `let enabled = true` |
+| Keyboard/mouse output | `tapKey`, `keyDown`, `clickMouse`, `moveMouse`, `wheelMouse` |
+| Delay | `sleepUs(microseconds)` |
+| Start input + watch + UI | `Spellwire.start(options)` |
+| Overlay layout | `ui.row`, `ui.column`, `ui.panel`, `ui.stack` |
+| Overlay content | `ui.text`, `ui.ellipse`, `ui.dot`, `ui.badge`, `ui.divider` |
+| State-bound UI | `overlay: state => ...`, `ui.bind`, `ui.when` |
+| UI styling | `width`, `height`, `padding`, `gap`, `fill`, `stroke`, `shadow`, `opacity`, font props |
+
+Use the **[one-page API reference](docs/api.md)** for signatures, defaults, option tables, a complete state-to-overlay application, and current window-policy limitations. Normal API lookup does not require moving between separate automation and overlay pages.
 
 ## Stateful realtime TypeScript
 
@@ -132,21 +149,22 @@ If this is your first live run, follow [Live Native Host Guide](docs/live-host.m
 
 ## Documentation
 
+Start here:
+
+- **[One-page API reference](docs/api.md)** — create/run/build, hotkeys, state, output, lifecycle, complete overlay API, defaults, and limitations in one searchable page
+- [Quick Start](docs/quick-start.md) — first project and first live run
+- [Troubleshooting](docs/troubleshooting.md) — errors and platform setup
+- [Platform Verification Guide](docs/platform-verification.md) — copyable macOS, Windows, and Linux checks
+
+Optional deep dives:
+
 - [Documentation index](docs/index.md)
-- [Quick Start](docs/quick-start.md)
-- [Live Native Host Guide](docs/live-host.md)
-- [Platform Verification Guide](docs/platform-verification.md)
-- [API reference](docs/api.md)
-- [Hotkeys, remaps, state gates, and AutoHotkey migration](docs/automation.md)
-- [Realtime TypeScript](docs/typescript-runtime.md)
-- [Architecture](docs/architecture.md)
-- [Native C ABI](docs/native-abi.md)
-- [Platforms](docs/platforms.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Publishing](docs/publishing.md)
-- [Implementation status](docs/status.md)
-- [Verification](docs/runtime-verification.md)
-- [Overlay design](docs/overlay.md)
+- [Automation semantics and AutoHotkey migration](docs/automation.md)
+- [Overlay renderer and performance design](docs/overlay.md)
+- [Realtime compiler subset](docs/typescript-runtime.md)
+- [Live native host internals](docs/live-host.md)
+- [Architecture](docs/architecture.md), [Native C ABI](docs/native-abi.md), and [Platforms](docs/platforms.md)
+- [Publishing](docs/publishing.md), [Implementation status](docs/status.md), and [Verification](docs/runtime-verification.md)
 
 ## Development
 
