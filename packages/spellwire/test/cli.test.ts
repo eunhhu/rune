@@ -1,13 +1,16 @@
 import { expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { runCli } from "../src/cli";
 
+const spellwireCli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+
 test("compile creates an explicit output directory and state manifest", async () => {
   const target = join(tmpdir(), `spellwire-cli-${crypto.randomUUID()}`);
-  const input = join(target, "src", "main.spellwire.ts");
+  const input = join(target, "src", "main.ts");
   const output = join(target, "dist", "main.spellwire.bin");
 
   try {
@@ -24,6 +27,18 @@ test("compile creates an explicit output directory and state manifest", async ()
     const manifest = await Bun.file(`${output}.json`).json();
     expect(manifest.handlers).toBe(1);
     expect(manifest.states.count).toEqual({ slot: 0, kind: "number" });
+
+    const defaultCompile = Bun.spawn([process.execPath, spellwireCli, "compile"], {
+      cwd: target,
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([
+      defaultCompile.exited,
+      new Response(defaultCompile.stderr).text(),
+    ]);
+    if (exitCode !== 0) throw new Error(`default input failed: ${stderr.trim()}`);
+    expect(await Bun.file(join(target, "src", "main.spellwire.bin")).exists()).toBe(true);
   } finally {
     await rm(target, { recursive: true, force: true });
   }

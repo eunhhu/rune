@@ -7,18 +7,18 @@ import { encodeModule } from "./compiler/encode";
 import { Spellwire } from "./app";
 
 const VERSION = "0.1.0";
-const DEFAULT_INPUT = "src/main.spellwire.ts";
+const DEFAULT_INPUTS = ["src/main.ts", "src/main.spellwire.ts"] as const;
 const HELP = `Spellwire ${VERSION}
 
 Usage:
-  spellwire run [input.spellwire.ts|input.spellwire.bin]
-  spellwire watch [input.spellwire.ts|input.spellwire.bin]
-  spellwire compile [input.spellwire.ts] [output.spellwire.bin]
+  spellwire run [input.ts|input.spellwire.bin]
+  spellwire watch [input.ts|input.spellwire.bin]
+  spellwire compile [input.ts] [output.spellwire.bin]
   spellwire --help
   spellwire --version
 
 Defaults:
-  input   src/main.spellwire.ts
+  input   src/main.ts (then legacy src/main.spellwire.ts)
   output  next to input as <name>.spellwire.bin
 
 Advanced options:
@@ -71,7 +71,7 @@ async function compileProgram(args: string[]): Promise<void> {
     throw new Error("spellwire compile accepts one input and one optional output");
   }
 
-  const input = positional[0] ?? DEFAULT_INPUT;
+  const input = positional[0] ?? await resolveDefaultInput();
 
   const absolute = resolve(input);
   if (!(await Bun.file(absolute).exists())) {
@@ -124,7 +124,7 @@ async function runNative(args: string[], watchMode: boolean): Promise<void> {
   if (positional.length > 1) {
     throw new Error("spellwire run/watch accepts one input program");
   }
-  const input = positional[0] ?? DEFAULT_INPUT;
+  const input = positional[0] ?? await resolveDefaultInput();
   const library = optionValue(args, "--library");
   const manifest = optionValue(args, "--manifest");
   const app = await Spellwire.start({
@@ -173,6 +173,13 @@ function optionValue(args: string[], option: string): string | undefined {
   const value = args[index + 1];
   if (!value || value.startsWith("--")) throw new Error(`${option} requires a value`);
   return value;
+}
+
+async function resolveDefaultInput(): Promise<string> {
+  for (const candidate of DEFAULT_INPUTS) {
+    if (await Bun.file(resolve(candidate)).exists()) return candidate;
+  }
+  return DEFAULT_INPUTS[0];
 }
 
 if (import.meta.main) {

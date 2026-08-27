@@ -26,9 +26,9 @@ export async function createSpellwireProject(
         private: true,
         type: "module",
         scripts: {
-          start: "bun src/app.ts",
-          watch: "bun src/app.ts --watch",
-          build: "spellwire compile src/main.spellwire.ts dist/main.spellwire.bin",
+          start: "bun src/main.ts",
+          watch: "bun src/main.ts --watch",
+          build: "spellwire compile src/main.ts dist/main.spellwire.bin",
         },
         dependencies: {
           spellwire: "latest",
@@ -63,8 +63,8 @@ export async function createSpellwireProject(
   );
 
   await Bun.write(
-    `${target}/src/main.spellwire.ts`,
-    `import { Key, rt, tapKey } from "spellwire";\n\n` +
+    `${target}/src/main.ts`,
+    `import { Key, Spellwire, rt, tapKey, ui } from "spellwire";\n\n` +
       `let enabled = true;\n` +
       `let presses = 0;\n\n` +
       `rt.hotkey("Q", () => {\n` +
@@ -73,15 +73,9 @@ export async function createSpellwireProject(
       `}, { when: () => enabled });\n\n` +
       `rt.hotkey("F8", () => {\n` +
       `  enabled = !enabled;\n` +
-      `}, { consume: false });\n`,
-  );
-
-  await Bun.write(
-    `${target}/src/app.ts`,
-    `import { fileURLToPath } from "node:url";\n` +
-      `import { Spellwire, ui } from "spellwire";\n\n` +
+      `}, { consume: false });\n\n` +
       `const app = await Spellwire.start({\n` +
-      `  input: fileURLToPath(new URL("./main.spellwire.ts", import.meta.url)),\n` +
+      `  input: import.meta.file,\n` +
       `  watch: Bun.argv.includes("--watch"),\n` +
       `  overlay: (state) => {\n` +
       `    const enabled = state.enabled === true;\n` +
@@ -124,8 +118,9 @@ export async function createSpellwireProject(
       `# Build dist/main.spellwire.bin and its state manifest\n` +
       `bun run build\n` +
       `\`\`\`\n\n` +
-      `Edit \`src/main.spellwire.ts\` for realtime logic and \`src/app.ts\` for the ` +
-      `state-driven overlay. The first live run requests required global ` +
+      `Edit \`src/main.ts\` for both realtime logic and the state-driven overlay. ` +
+      `The compiler extracts only realtime handlers; ` +
+      `application code remains on Bun. The first live run requests required global ` +
       `input permissions. String hotkeys compile to native chords; the \`when\` gate makes ` +
       `inactive input pass through. Press \`Ctrl+C\` to stop and release held synthetic input.\n`,
   );
@@ -142,8 +137,8 @@ export async function createSpellwireProject(
       `# dist/main.spellwire.bin과 상태 manifest 생성\n` +
       `bun run build\n` +
       `\`\`\`\n\n` +
-      `realtime 로직은 \`src/main.spellwire.ts\`, 상태 기반 overlay는 \`src/app.ts\`에서 ` +
-      `편집하십시오. 첫 live run은 필요한 전역 입력 권한을 ` +
+      `realtime 로직과 상태 기반 overlay는 모두 \`src/main.ts\`에서 편집하십시오. compiler는 ` +
+      `realtime handler만 추출하고 application code는 Bun에 유지합니다. 첫 live run은 필요한 전역 입력 권한을 ` +
       `요청합니다. 문자열 hotkey는 native chord로 compile되며 \`when\` gate가 꺼진 입력은 ` +
       `원래 앱으로 통과합니다. \`Ctrl+C\`로 종료하면 눌린 상태의 합성 입력도 해제합니다.\n`,
   );

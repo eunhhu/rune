@@ -38,7 +38,7 @@ export class Spellwire {
   }
 
   static async start(options: SpellwireStartOptions = {}): Promise<Spellwire> {
-    const host = await NativeHost.load(options.input ?? "src/main.spellwire.ts", {
+    const host = await NativeHost.load(await resolveInput(options.input), {
       ...(options.nativeLibraryPath === undefined
         ? {}
         : { nativeLibraryPath: options.nativeLibraryPath }),
@@ -101,6 +101,14 @@ export class Spellwire {
   #assertOpen(): void {
     if (this.#closed) throw new Error("Spellwire app is closed");
   }
+}
+
+async function resolveInput(explicit: string | undefined): Promise<string> {
+  if (explicit !== undefined) return explicit;
+  for (const candidate of ["src/main.ts", "src/main.spellwire.ts"] as const) {
+    if (await Bun.file(candidate).exists()) return candidate;
+  }
+  return "src/main.ts";
 }
 
 function preparePermissions(host: NativeHost): void {

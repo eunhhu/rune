@@ -16,21 +16,25 @@ test("creates a buildable Spellwire project", async () => {
     const packageJson = await Bun.file(join(target, "package.json")).json();
     expect(packageJson.dependencies.spellwire).toBe("latest");
     expect(Object.keys(packageJson.scripts)).toEqual(["start", "watch", "build"]);
-    expect(packageJson.scripts.start).toBe("bun src/app.ts");
-    expect(packageJson.scripts.watch).toBe("bun src/app.ts --watch");
+    expect(packageJson.scripts.start).toBe("bun src/main.ts");
+    expect(packageJson.scripts.watch).toBe("bun src/main.ts --watch");
     expect(packageJson.scripts.build).toBe(
-      "spellwire compile src/main.spellwire.ts dist/main.spellwire.bin",
+      "spellwire compile src/main.ts dist/main.spellwire.bin",
     );
-    const realtime = await Bun.file(join(target, "src/main.spellwire.ts")).text();
-    expect(realtime).toContain('rt.hotkey("Q"');
-    expect(realtime).toContain("when: () => enabled");
+    const source = await Bun.file(join(target, "src/main.ts")).text();
+    expect(source).toContain('rt.hotkey("Q"');
+    expect(source).toContain("when: () => enabled");
+    expect(source).toContain("Spellwire.start");
+    expect(source).toContain("input: import.meta.file");
+    expect(source).toContain("ui.column");
+    expect(source).toContain("overlay: (state)");
     const output = join(target, "dist/main.spellwire.bin");
     const compiler = Bun.spawn(
       [
         process.execPath,
         spellwireCli,
         "compile",
-        join(target, "src/main.spellwire.ts"),
+        join(target, "src/main.ts"),
         output,
       ],
       { stdout: "ignore", stderr: "pipe" },
@@ -42,10 +46,7 @@ test("creates a buildable Spellwire project", async () => {
     if (exitCode !== 0) throw new Error(`generated project failed to compile: ${stderr.trim()}`);
     expect(await Bun.file(output).exists()).toBe(true);
     expect(await Bun.file(`${output}.json`).exists()).toBe(true);
-    const app = await Bun.file(join(target, "src/app.ts")).text();
-    expect(app).toContain("Spellwire.start");
-    expect(app).toContain("ui.column");
-    expect(app).toContain("overlay: (state)");
+    expect(await Bun.file(join(target, "src/app.ts")).exists()).toBe(false);
     const readme = await Bun.file(join(target, "README.md")).text();
     expect(readme).toContain("bun run start");
     expect(readme).toContain("bun run watch");
